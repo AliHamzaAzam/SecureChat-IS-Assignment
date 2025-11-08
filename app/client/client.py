@@ -707,10 +707,10 @@ def register_user(sock: socket.socket, session_key: bytes):
 
 def login_user(sock: socket.socket, session_key: bytes):
     """
-    Perform user login with encrypted credentials.
+    Perform user login with encrypted credentials and dual-gate authentication.
 
-    Prompts user for email and password, then encrypts and sends
-    the login data to the server over the established DH session.
+    Prompts user for email and password, encrypts and sends login data to server
+    over the established DH session. Server verifies both certificate and password.
 
     Args:
         sock: Connected socket to server
@@ -772,15 +772,59 @@ def login_user(sock: socket.socket, session_key: bytes):
         
         logger.info(f"Sent encrypted login for user {email}")
         print(f"[+] Sent encrypted login data to server")
-        print(f"[+] Login successful!")
+        
+        # Receive response from server
+        logger.info("Waiting for login response from server")
+        length_bytes = sock.recv(4)
+        if not length_bytes:
+            logger.error("Server closed connection before sending login response")
+            print(f"[!] Server closed connection")
+            return
+
+        msg_len = int.from_bytes(length_bytes, byteorder='big')
+        if msg_len > 1024 * 1024:
+            logger.error(f"Response message too large: {msg_len} bytes")
+            print(f"[!] Response message too large")
+            return
+
+        msg_bytes = b''
+        while len(msg_bytes) < msg_len:
+            chunk = sock.recv(msg_len - len(msg_bytes))
+            if not chunk:
+                logger.error("Connection closed while reading login response")
+                print(f"[!] Connection closed by server")
+                return
+            msg_bytes += chunk
+
+        msg_json = msg_bytes.decode('utf-8')
+        response = json.loads(msg_json)
+        
+        success = response.get('success', False)
+        username = response.get('username')
+        message = response.get('message', 'Unknown response')
+        
+        if success:
+            logger.info(f"Login successful for user {username}")
+            print(f"\n[+] Login successful!")
+            print(f"[+] {message}")
+            print(f"[*] Authenticated session established")
+            # TODO: Transition to chat mode
+            return True
+        else:
+            logger.warning(f"Login failed for user {email}: {message}")
+            print(f"\n[!] Login failed: {message}")
+            return False
 
     except EOFError:
         print("\n[*] Login cancelled")
+        return False
     except KeyboardInterrupt:
         print("\n[*] Login cancelled")
+        return False
     except Exception as e:
         logger.error(f"Error during login: {e}")
         print(f"[!] Login failed: {e}")
+        return False
 
 
 def main_menu() -> int:

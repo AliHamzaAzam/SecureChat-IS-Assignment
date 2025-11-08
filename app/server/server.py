@@ -43,7 +43,7 @@ try:
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_decrypt
-    from app.server.registration import register_user
+    from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -51,7 +51,7 @@ except ModuleNotFoundError:
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_decrypt
-    from app.server.registration import register_user
+    from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
 
 
@@ -524,6 +524,170 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
                 client_socket.sendall(
                     len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
                 )
+
+        elif msg_type == 'LOGIN_ENCRYPTED':
+            logger.info(f"[{client_id}] Processing encrypted login request")
+            print(f"[{client_id}] [*] Processing login request...")
+
+            try:
+                # Step 1: Decrypt login data
+                ciphertext_b64 = msg_dict.get('ciphertext')
+                if not ciphertext_b64:
+                    logger.error(f"[{client_id}] LOGIN_ENCRYPTED missing ciphertext")
+                    response = {
+                        "type": "login_response",
+                        "success": False,
+                        "username": None,
+                        "message": "Invalid login message"
+                    }
+                    response_json = json.dumps(response, separators=(",", ":"))
+                    response_bytes = response_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                    )
+                    return
+
+                ciphertext = base64.b64decode(ciphertext_b64)
+                plaintext = aes_decrypt(ciphertext, session_key)
+                login_data = json.loads(plaintext)
+                
+                logger.debug(f"[{client_id}] Decrypted login data successfully")
+                print(f"[{client_id}] [+] Decrypted login payload")
+
+                # Step 2: Extract fields
+                email = login_data.get('email', '').strip()
+                password = login_data.get('password', '').strip()
+
+                if not email or not password:
+                    logger.warning(f"[{client_id}] Login data missing email or password")
+                    response = {
+                        "type": "login_response",
+                        "success": False,
+                        "username": None,
+                        "message": "Missing email or password"
+                    }
+                    response_json = json.dumps(response, separators=(",", ":"))
+                    response_bytes = response_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                    )
+                    return
+
+                logger.info(f"[{client_id}] [GATE 1] Certificate already validated during cert exchange")
+                print(f"[{client_id}] [GATE 1] ✓ Certificate valid")
+
+                # Step 3: Get database connection and verify password
+                try:
+                    db_conn = get_connection()
+                except Exception as e:
+                    logger.error(f"[{client_id}] Failed to get database connection: {e}")
+                    response = {
+                        "type": "login_response",
+                        "success": False,
+                        "username": None,
+                        "message": "Database connection failed"
+                    }
+                    response_json = json.dumps(response, separators=(",", ":"))
+                    response_bytes = response_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                    )
+                    return
+
+                # Step 4: GATE 2 - Verify password hash
+                logger.info(f"[{client_id}] [GATE 2] Verifying password hash...")
+                print(f"[{client_id}] [GATE 2] Verifying password hash...")
+                
+                try:
+                    success, username = verify_login(email, password, db_conn)
+                finally:
+                    try:
+                        db_conn.close()
+                    except:
+                        pass
+
+                if success:
+                    logger.info(f"[{client_id}] [GATE 2] ✓ Password verified for user {username}")
+                    print(f"[{client_id}] [GATE 2] ✓ Password verified for user {username}")
+                    
+                    logger.info(f"[{client_id}] [AUTH COMPLETE] Dual-gate authentication succeeded: {username}")
+                    print(f"[{client_id}] [+] Dual-gate authentication successful!")
+                    print(f"[{client_id}]     User: {username} ({email})")
+                    print(f"[{client_id}]     ✓ Certificate valid (gate 1)")
+                    print(f"[{client_id}]     ✓ Password verified (gate 2)")
+                    print(f"[{client_id}] [*] Session authenticated - ready for chat...")
+
+                    response = {
+                        "type": "login_response",
+                        "success": True,
+                        "username": username,
+                        "message": f"Login successful: {username}"
+                    }
+                    
+                    # Send response
+                    response_json = json.dumps(response, separators=(",", ":"))
+                    response_bytes = response_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                    )
+                    
+                    logger.debug(f"[{client_id}] Sent successful login response")
+                    print(f"[{client_id}] [+] Sent login response - keeping connection open")
+                    
+                    # TODO: Transition to chat session mode (keep connection open)
+                    # For now, close the connection gracefully
+                    logger.info(f"[{client_id}] Authenticated session - ready for chat messages")
+                    return
+                    
+                else:
+                    logger.warning(f"[{client_id}] [GATE 2] ✗ Password verification failed for {email}")
+                    print(f"[{client_id}] [GATE 2] ✗ Password verification failed")
+                    
+                    response = {
+                        "type": "login_response",
+                        "success": False,
+                        "username": None,
+                        "message": "Invalid email or password"
+                    }
+                    
+                    response_json = json.dumps(response, separators=(",", ":"))
+                    response_bytes = response_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                    )
+                    
+                    logger.debug(f"[{client_id}] Sent failed login response")
+                    print(f"[{client_id}] [*] Sent login response - closing connection")
+                    return
+
+            except json.JSONDecodeError as e:
+                logger.error(f"[{client_id}] Failed to parse decrypted login data: {e}")
+                response = {
+                    "type": "login_response",
+                    "success": False,
+                    "username": None,
+                    "message": "Invalid login data format"
+                }
+                response_json = json.dumps(response, separators=(",", ":"))
+                response_bytes = response_json.encode('utf-8')
+                client_socket.sendall(
+                    len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                )
+                return
+            except Exception as e:
+                logger.error(f"[{client_id}] Decryption/processing error: {e}")
+                response = {
+                    "type": "login_response",
+                    "success": False,
+                    "username": None,
+                    "message": "Processing error"
+                }
+                response_json = json.dumps(response, separators=(",", ":"))
+                response_bytes = response_json.encode('utf-8')
+                client_socket.sendall(
+                    len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                )
+                return
 
         else:
             logger.warning(f"[{client_id}] Unknown message type after DH exchange: {msg_type}")
