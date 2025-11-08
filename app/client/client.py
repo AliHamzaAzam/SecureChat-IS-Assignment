@@ -38,7 +38,14 @@ import json
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
-from app.common.protocol import serialize_message, deserialize_message
+
+# Handle imports whether run as module or script
+try:
+    from app.common.protocol import serialize_message, deserialize_message
+except ModuleNotFoundError:
+    # Add parent directory to path when run as script
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from app.common.protocol import serialize_message, deserialize_message
 
 
 # Configure logging
