@@ -36,16 +36,20 @@ import sys
 import os
 import json
 import logging
+import secrets
+import base64
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Handle imports whether run as module or script
 try:
-    from app.common.protocol import serialize_message, deserialize_message
+    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message
+    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
 except ModuleNotFoundError:
     # Add parent directory to path when run as script
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from app.common.protocol import serialize_message, deserialize_message
+    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message
+    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
 
 
 # Configure logging
@@ -65,6 +69,7 @@ SERVER_PORT = int(os.getenv("SERVER_PORT", "5000"))
 CERT_DIR = Path(__file__).parent.parent.parent / "certs"
 CLIENT_CERT_PATH = CERT_DIR / "client_cert.pem"
 CLIENT_KEY_PATH = CERT_DIR / "client_key.pem"
+CA_CERT_PATH = CERT_DIR / "ca_cert.pem"
 
 # Message framing constants
 LENGTH_PREFIX_SIZE = 4  # 4 bytes for message length
@@ -314,6 +319,126 @@ def receive_message(sock: socket.socket) -> dict:
         raise
 
 
+def exchange_certificates(sock: socket.socket, client_cert_pem: str) -> str:
+    """
+    Perform certificate exchange with server.
+
+    Implements the client side of the certificate exchange protocol:
+        1. Send HELLO with client certificate and nonce
+        2. Receive SERVER_HELLO from server with server certificate
+        3. Validate server certificate against CA
+        4. Store server certificate for session
+
+    Args:
+        sock: Connected socket to server
+        client_cert_pem: Client's PEM-encoded certificate
+
+    Returns:
+        str: Server's PEM-encoded certificate if successful
+
+    Raises:
+        socket.error: If socket operations fail
+        ValueError: If certificate validation fails or protocol error
+        Exception: For any other protocol-level errors
+    """
+    try:
+        # Step 1: Send HELLO with client certificate and nonce
+        logger.info("Sending HELLO with client certificate")
+        client_nonce = base64.b64encode(secrets.token_bytes(16)).decode('utf-8')
+        hello_msg = ControlPlaneMsg(
+            type=MessageType.HELLO.value,
+            nonce=client_nonce,
+            client_cert=client_cert_pem
+        )
+        msg_json = serialize_message(hello_msg)
+        msg_bytes = msg_json.encode('utf-8')
+
+        # Send with length prefix
+        msg_len = len(msg_bytes)
+        sock.sendall(
+            msg_len.to_bytes(4, byteorder='big') + msg_bytes
+        )
+        logger.debug(f"HELLO sent ({msg_len} bytes)")
+        print("[+] Sent HELLO with certificate to server")
+
+        # Step 2: Receive SERVER_HELLO from server
+        logger.info("Waiting for SERVER_HELLO from server")
+        length_bytes = sock.recv(4)
+        if not length_bytes:
+            logger.error("Server closed connection before sending SERVER_HELLO")
+            raise socket.error("Server closed connection")
+
+        msg_len = int.from_bytes(length_bytes, byteorder='big')
+        if msg_len > 1024 * 1024:  # 1MB max
+            logger.error(f"SERVER_HELLO message too large: {msg_len} bytes")
+            raise ValueError(f"Message too large: {msg_len} bytes")
+
+        msg_bytes = b''
+        while len(msg_bytes) < msg_len:
+            chunk = sock.recv(msg_len - len(msg_bytes))
+            if not chunk:
+                logger.error("Connection closed while reading SERVER_HELLO")
+                raise socket.error("Connection closed by server")
+            msg_bytes += chunk
+
+        msg_json = msg_bytes.decode('utf-8')
+        msg_dict = json.loads(msg_json)
+        logger.debug(f"Received message type: {msg_dict.get('type')}")
+
+        # Validate message type
+        if msg_dict.get('type') != MessageType.SERVER_HELLO.value:
+            logger.error(f"Expected SERVER_HELLO, got {msg_dict.get('type')}")
+            raise ValueError(f"Unexpected message type: {msg_dict.get('type')}")
+
+        # Step 3: Extract server certificate
+        server_cert_pem = msg_dict.get('server_cert')
+        if not server_cert_pem:
+            logger.error("SERVER_HELLO missing server_cert field")
+            raise ValueError("SERVER_HELLO missing server_cert")
+
+        # Step 4: Validate server certificate against CA
+        logger.info("Validating server certificate")
+        try:
+            server_cert_obj = load_certificate_from_pem_string(server_cert_pem)
+        except Exception as e:
+            logger.error(f"Failed to load server certificate: {e}")
+            raise ValueError(f"Invalid server certificate: {e}")
+
+        try:
+            ca_cert = load_certificate(str(CA_CERT_PATH))
+            is_valid, error_msg = validate_certificate(server_cert_obj, ca_cert)
+
+            if not is_valid:
+                logger.warning(f"Certificate validation failed: {error_msg}")
+                print(f"[!] BAD_CERT: {error_msg}")
+                raise ValueError(f"Server certificate validation failed: {error_msg}")
+
+            logger.info("Server certificate validation successful")
+            print("[+] Server certificate validated")
+
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Error during certificate validation: {e}")
+            raise ValueError(f"Certificate validation error: {e}")
+
+        # Step 5: Certificate exchange complete
+        logger.info("Certificate exchange complete - session established")
+        return server_cert_pem
+
+    except socket.error as e:
+        logger.error(f"Socket error during certificate exchange: {e}")
+        raise
+
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        raise ValueError(f"Invalid JSON in certificate exchange: {e}")
+
+    except Exception as e:
+        logger.error(f"Error during certificate exchange: {e}")
+        raise
+
+
 def main_menu() -> int:
     """
     Display main menu and get user choice.
@@ -358,8 +483,8 @@ def main():
     """
     Main client entry point.
 
-    Loads credentials, connects to server, and presents user menu.
-    Placeholder for protocol implementation.
+    Loads credentials, connects to server, performs certificate exchange,
+    and presents user menu.
 
     Exit codes:
         0: Normal shutdown
@@ -372,6 +497,16 @@ def main():
 
         # Connect to server
         sock = connect_to_server(SERVER_HOST, SERVER_PORT)
+
+        # Perform certificate exchange with server
+        try:
+            server_cert_pem = exchange_certificates(sock, cert_pem)
+            print("[+] Certificate exchange successful")
+        except (socket.error, ValueError) as e:
+            logger.error(f"Certificate exchange failed: {e}")
+            print(f"[!] Certificate exchange failed: {e}")
+            sock.close()
+            sys.exit(1)
 
         while True:
             choice = main_menu()

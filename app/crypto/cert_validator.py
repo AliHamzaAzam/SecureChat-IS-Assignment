@@ -9,7 +9,7 @@ This module provides functions to:
 """
 
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple, Optional
 
 from cryptography import x509
@@ -17,6 +17,29 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from cryptography.x509.oid import ExtensionOID
+
+
+def load_certificate_from_pem_string(pem_string: str) -> x509.Certificate:
+    """
+    Load an X.509 certificate from a PEM-encoded string.
+
+    Args:
+        pem_string: PEM-encoded certificate as string
+
+    Returns:
+        Loaded X.509 certificate object
+
+    Raises:
+        ValueError: If the string is not a valid PEM certificate
+    """
+    try:
+        cert_pem = pem_string.encode('utf-8')
+        certificate = x509.load_pem_x509_certificate(cert_pem)
+        return certificate
+    except ValueError as e:
+        raise ValueError(f"Invalid PEM certificate format: {e}")
+    except Exception as e:
+        raise ValueError(f"Error loading certificate: {e}")
 
 
 def load_certificate(cert_path: str) -> x509.Certificate:
@@ -101,14 +124,14 @@ def validate_certificate(cert: x509.Certificate,
         - If invalid: (False, descriptive error message)
     """
     try:
-        # Check certificate expiration
-        now = datetime.utcnow()
+        # Check certificate expiration using UTC timezone-aware datetime
+        now = datetime.now(timezone.utc)
         
-        if now < cert.not_valid_before:
-            return (False, f"Certificate not yet valid (valid from {cert.not_valid_before})")
+        if now < cert.not_valid_before_utc:
+            return (False, f"Certificate not yet valid (valid from {cert.not_valid_before_utc})")
         
-        if now > cert.not_valid_after:
-            return (False, f"Certificate has expired (valid until {cert.not_valid_after})")
+        if now > cert.not_valid_after_utc:
+            return (False, f"Certificate has expired (valid until {cert.not_valid_after_utc})")
         
         # Verify certificate signature with CA public key
         ca_public_key = ca_cert.public_key()
