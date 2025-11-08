@@ -102,10 +102,79 @@ When submitting on Google Classroom (GCR):
 4. `RollNumber-FullName-Report-A02.docx`
 5. `RollNumber-FullName-TestReport-A02.docx`
 
-## 🧪 Test Evidence Checklist
+## 📋 Usage Guide
 
-✔ Wireshark capture (encrypted payloads only)  
-✔ Invalid/self-signed cert rejected (`BAD_CERT`)  
-✔ Tamper test → signature verification fails (`SIG_FAIL`)  
-✔ Replay test → rejected by seqno (`REPLAY`)  
-✔ Non-repudiation → exported transcript + signed SessionReceipt verified offline  
+### Starting the Server
+```bash
+python -m app.server
+```
+The server listens on the configured `SERVER_HOST` and `SERVER_PORT` (default: localhost:9999).
+
+### Starting a Client
+```bash
+python -m app.client
+```
+The client connects to the server and provides an interactive console for sending messages.
+
+### Database Initialization
+```bash
+python -m app.storage.db --init
+```
+This creates the necessary tables in MySQL and initializes the database schema.
+
+## 🔐 Security Features Implemented
+
+- **Confidentiality**: AES-128 ECB mode with PKCS#7 padding
+- **Integrity**: HMAC verification of all messages
+- **Authenticity**: RSA signatures with SHA-256
+- **Non-Repudiation**: Signed session receipts and append-only transcript
+- **Key Exchange**: Diffie-Hellman key agreement
+- **Certificate Validation**: X.509 PKI with Root CA signature verification
+
+## 🧪 Testing
+
+### Manual Testing
+See `tests/manual/NOTES.md` for detailed manual testing procedures.
+
+### Wireshark Analysis
+1. Start tcpdump or Wireshark to capture traffic on localhost:9999
+2. Run server and client
+3. Verify that payloads are encrypted and only metadata is visible
+
+### Test Evidence Checklist
+
+✔ **Wireshark capture** - Encrypted payloads only  
+✔ **Invalid cert rejection** - `BAD_CERT` status for self-signed certificates  
+✔ **Tamper test** - Signature verification fails (`SIG_FAIL`)  
+✔ **Replay protection** - Rejected by sequence number (`REPLAY`)  
+✔ **Non-repudiation** - Exported transcript + signed SessionReceipt verified offline
+
+## 📝 Project Structure Details
+
+### Crypto Modules
+- **`aes.py`**: Encryption/decryption with AES-128-ECB and PKCS#7
+- **`dh.py`**: Diffie-Hellman prime generation and key derivation
+- **`pki.py`**: X.509 certificate validation against Root CA
+- **`sign.py`**: RSA-2048 signature generation and verification
+
+### Application Layer
+- **`protocol.py`**: Pydantic models for all message types
+- **`utils.py`**: Base64 encoding, timestamping, SHA-256 hashing
+- **`client.py`**: Client-side protocol handler and UI
+- **`server.py`**: Server-side session management and message routing
+
+### Storage
+- **`db.py`**: MySQL connection pooling and user management
+- **`transcript.py`**: Immutable session logs with cryptographic verification
+
+### Scripts
+- **`gen_ca.py`**: Root CA certificate generation (self-signed X.509)
+- **`gen_cert.py`**: Client and server certificate issuance signed by Root CA
+
+## 🛠️ Development Notes
+
+- All cryptographic operations use the `cryptography` library
+- MySQL user accounts store salted SHA-256 password hashes
+- Transcripts are append-only and include sequence numbers
+- All messages include timestamps (milliseconds since epoch)
+- Certificates are stored in `certs/` directory (not committed to git)
