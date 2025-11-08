@@ -32,6 +32,7 @@ import logging
 import json
 import secrets
 import base64
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -41,11 +42,17 @@ try:
     from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
+    from app.crypto.aes_crypto import aes_decrypt
+    from app.server.registration import register_user
+    from app.storage.db import get_connection
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
+    from app.crypto.aes_crypto import aes_decrypt
+    from app.server.registration import register_user
+    from app.storage.db import get_connection
 
 
 # Configure logging
@@ -335,7 +342,192 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
 
         logger.info(f"[{client_id}] DH key agreement complete - ready for encrypted registration/login")
         print(f"[{client_id}] [*] Waiting for encrypted registration/login data...")
-        # TODO: Implement message handling loop for encrypted data
+
+        # Step 9: Receive encrypted registration/login message
+        logger.info(f"[{client_id}] Waiting for encrypted auth message")
+        length_bytes = client_socket.recv(4)
+        if not length_bytes:
+            logger.warning(f"[{client_id}] Client closed connection before sending encrypted message")
+            return
+
+        msg_len = int.from_bytes(length_bytes, byteorder='big')
+        if msg_len > 1024 * 1024:
+            logger.error(f"[{client_id}] Message too large: {msg_len} bytes")
+            return
+
+        msg_bytes = b''
+        while len(msg_bytes) < msg_len:
+            chunk = client_socket.recv(msg_len - len(msg_bytes))
+            if not chunk:
+                logger.error(f"[{client_id}] Connection closed while reading encrypted message")
+                return
+            msg_bytes += chunk
+
+        msg_json = msg_bytes.decode('utf-8')
+        msg_dict = json.loads(msg_json)
+        msg_type = msg_dict.get('type')
+
+        # Handle registration
+        if msg_type == 'REGISTER_ENCRYPTED':
+            logger.info(f"[{client_id}] Processing encrypted registration request")
+            print(f"[{client_id}] [*] Processing registration request...")
+
+            try:
+                # Decrypt registration data
+                ciphertext_b64 = msg_dict.get('ciphertext')
+                if not ciphertext_b64:
+                    logger.error(f"[{client_id}] REGISTER_ENCRYPTED missing ciphertext")
+                    response = {
+                        "type": "register_response",
+                        "success": False,
+                        "message": "Invalid registration message"
+                    }
+                    response_json = json.dumps(response, separators=(",", ":"))
+                    response_bytes = response_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                    )
+                    return
+
+                ciphertext = base64.b64decode(ciphertext_b64)
+                plaintext = aes_decrypt(ciphertext, session_key)
+                registration_data = json.loads(plaintext)
+                
+                logger.debug(f"[{client_id}] Decrypted registration data successfully")
+                print(f"[{client_id}] [+] Decrypted registration payload")
+
+                # Extract fields
+                email = registration_data.get('email', '').strip()
+                username = registration_data.get('username', '').strip()
+                pwd_hash = registration_data.get('pwd_hash', '').strip()
+                salt_b64 = registration_data.get('salt', '').strip()
+
+                if not all([email, username, pwd_hash, salt_b64]):
+                    logger.error(f"[{client_id}] Registration data missing required fields")
+                    response = {
+                        "type": "register_response",
+                        "success": False,
+                        "message": "Missing required fields"
+                    }
+                    response_json = json.dumps(response, separators=(",", ":"))
+                    response_bytes = response_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                    )
+                    return
+
+                logger.debug(f"[{client_id}] Extracted: email={email}, username={username}")
+
+                # Decode salt from base64
+                salt = base64.b64decode(salt_b64)
+
+                # Get database connection
+                try:
+                    db_conn = get_connection()
+                except Exception as e:
+                    logger.error(f"[{client_id}] Failed to get database connection: {e}")
+                    response = {
+                        "type": "register_response",
+                        "success": False,
+                        "message": "Database connection failed"
+                    }
+                    response_json = json.dumps(response, separators=(",", ":"))
+                    response_bytes = response_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                    )
+                    return
+
+                # Call register_user with password hash and salt
+                # Note: register_user expects password, but we'll pass empty and use hash directly
+                # For now, we'll create a custom registration call
+                try:
+                    cursor = db_conn.cursor()
+
+                    # Check if email already exists
+                    cursor.execute("SELECT email FROM users WHERE email = %s", (email,))
+                    if cursor.fetchone():
+                        cursor.close()
+                        logger.warning(f"[{client_id}] Email already registered: {email}")
+                        response = {
+                            "type": "register_response",
+                            "success": False,
+                            "message": f"Email already registered: {email}"
+                        }
+                    else:
+                        # Check if username already exists
+                        cursor.execute("SELECT username FROM users WHERE username = %s", (username,))
+                        if cursor.fetchone():
+                            cursor.close()
+                            logger.warning(f"[{client_id}] Username already taken: {username}")
+                            response = {
+                                "type": "register_response",
+                                "success": False,
+                                "message": f"Username already taken: {username}"
+                            }
+                        else:
+                            # Insert new user with provided hash and salt
+                            cursor.execute(
+                                "INSERT INTO users (email, username, salt, pwd_hash) VALUES (%s, %s, %s, %s)",
+                                (email, username, salt, pwd_hash)
+                            )
+                            db_conn.commit()
+                            cursor.close()
+                            
+                            logger.info(f"[{client_id}] User registered successfully: {username}")
+                            print(f"[{client_id}] [+] User registered: {username}")
+                            
+                            response = {
+                                "type": "register_response",
+                                "success": True,
+                                "message": f"User registered successfully: {username}"
+                            }
+
+                except Exception as e:
+                    logger.error(f"[{client_id}] Database error during registration: {e}")
+                    response = {
+                        "type": "register_response",
+                        "success": False,
+                        "message": "Database error during registration"
+                    }
+
+                # Send response
+                response_json = json.dumps(response, separators=(",", ":"))
+                response_bytes = response_json.encode('utf-8')
+                client_socket.sendall(
+                    len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                )
+                logger.debug(f"[{client_id}] Sent registration response")
+                print(f"[{client_id}] [*] Sent response to client - closing connection")
+
+            except json.JSONDecodeError as e:
+                logger.error(f"[{client_id}] Failed to parse decrypted registration data: {e}")
+                response = {
+                    "type": "register_response",
+                    "success": False,
+                    "message": "Invalid registration data format"
+                }
+                response_json = json.dumps(response, separators=(",", ":"))
+                response_bytes = response_json.encode('utf-8')
+                client_socket.sendall(
+                    len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                )
+            except Exception as e:
+                logger.error(f"[{client_id}] Decryption/processing error: {e}")
+                response = {
+                    "type": "register_response",
+                    "success": False,
+                    "message": "Processing error"
+                }
+                response_json = json.dumps(response, separators=(",", ":"))
+                response_bytes = response_json.encode('utf-8')
+                client_socket.sendall(
+                    len(response_bytes).to_bytes(4, byteorder='big') + response_bytes
+                )
+
+        else:
+            logger.warning(f"[{client_id}] Unknown message type after DH exchange: {msg_type}")
+            print(f"[{client_id}] [!] Unknown message type: {msg_type}")
 
     except socket.timeout:
         logger.warning(f"[{client_id}] Connection timeout")

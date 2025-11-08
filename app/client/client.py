@@ -38,6 +38,7 @@ import json
 import logging
 import secrets
 import base64
+import hashlib
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -573,8 +574,8 @@ def register_user(sock: socket.socket, session_key: bytes):
     """
     Perform user registration with encrypted credentials.
 
-    Prompts user for email, username, and password, then encrypts and sends
-    the registration data to the server over the established DH session.
+    Prompts user for email, username, and password, generates random salt,
+    computes salted SHA-256 hash, and sends encrypted registration data.
 
     Args:
         sock: Connected socket to server
@@ -605,11 +606,26 @@ def register_user(sock: socket.socket, session_key: bytes):
             print("[!] Password cannot be empty")
             return
 
-        # Create registration data JSON
+        # Generate random 16-byte salt
+        logger.debug("Generating random salt for password hashing")
+        salt = secrets.token_bytes(16)
+        salt_b64 = base64.b64encode(salt).decode('utf-8')
+        
+        # Compute password hash: SHA256(salt + password)
+        hash_input = salt + password.encode('utf-8')
+        pwd_hash = hashlib.sha256(hash_input).hexdigest()
+        
+        logger.info(f"Generated salt and computed password hash for user {username}")
+        print(f"\n[*] Hashing password with salt...")
+        print(f"[+] Salt (base64): {salt_b64[:20]}...")
+        print(f"[+] Password hash: {pwd_hash[:32]}...")
+
+        # Create registration data JSON with hashed password
         registration_data = {
             "email": email,
             "username": username,
-            "password": password
+            "pwd_hash": pwd_hash,
+            "salt": salt_b64
         }
         
         logger.info(f"Encrypting registration data for user {username}")
@@ -642,7 +658,43 @@ def register_user(sock: socket.socket, session_key: bytes):
         
         logger.info(f"Sent encrypted registration for user {username}")
         print(f"[+] Sent encrypted registration data to server")
-        print(f"[+] Registration successful!")
+        
+        # Receive response from server
+        logger.info("Waiting for registration response from server")
+        length_bytes = sock.recv(4)
+        if not length_bytes:
+            logger.error("Server closed connection before sending registration response")
+            print(f"[!] Server closed connection")
+            return
+
+        msg_len = int.from_bytes(length_bytes, byteorder='big')
+        if msg_len > 1024 * 1024:
+            logger.error(f"Response message too large: {msg_len} bytes")
+            print(f"[!] Response message too large")
+            return
+
+        msg_bytes = b''
+        while len(msg_bytes) < msg_len:
+            chunk = sock.recv(msg_len - len(msg_bytes))
+            if not chunk:
+                logger.error("Connection closed while reading registration response")
+                print(f"[!] Connection closed by server")
+                return
+            msg_bytes += chunk
+
+        msg_json = msg_bytes.decode('utf-8')
+        response = json.loads(msg_json)
+        
+        success = response.get('success', False)
+        message = response.get('message', 'Unknown response')
+        
+        if success:
+            logger.info(f"Registration successful for user {username}")
+            print(f"[+] Registration successful!")
+            print(f"[+] {message}")
+        else:
+            logger.warning(f"Registration failed for user {username}: {message}")
+            print(f"[!] Registration failed: {message}")
 
     except EOFError:
         print("\n[*] Registration cancelled")
