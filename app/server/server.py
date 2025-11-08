@@ -38,12 +38,14 @@ from dotenv import load_dotenv
 
 # Handle imports whether run as module or script
 try:
-    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message
+    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
+    from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message
+    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
+    from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
 
 
 # Configure logging
@@ -243,10 +245,97 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
             logger.error(f"[{client_id}] Error during certificate validation: {e}")
             return
 
-        # Step 4: Certificate exchange complete - continue with protocol
-        logger.info(f"[{client_id}] Certificate exchange complete - session established")
-        # TODO: Implement DH key exchange
-        # TODO: Implement message handling loop
+        # Step 4: Certificate exchange complete - proceed with DH exchange
+        logger.info(f"[{client_id}] Certificate exchange complete - initiating DH key agreement")
+        print(f"[{client_id}] [*] Initiating DH key agreement for registration encryption...")
+
+        # Step 5: Receive DH_CLIENT from client
+        logger.info(f"[{client_id}] Waiting for DH_CLIENT message")
+        length_bytes = client_socket.recv(4)
+        if not length_bytes:
+            logger.warning(f"[{client_id}] Client closed connection before sending DH_CLIENT")
+            return
+
+        msg_len = int.from_bytes(length_bytes, byteorder='big')
+        if msg_len > 1024 * 1024:
+            logger.error(f"[{client_id}] DH_CLIENT message too large: {msg_len} bytes")
+            return
+
+        msg_bytes = b''
+        while len(msg_bytes) < msg_len:
+            chunk = client_socket.recv(msg_len - len(msg_bytes))
+            if not chunk:
+                logger.error(f"[{client_id}] Connection closed while reading DH_CLIENT")
+                return
+            msg_bytes += chunk
+
+        msg_json = msg_bytes.decode('utf-8')
+        msg_dict = json.loads(msg_json)
+
+        if msg_dict.get('type') != MessageType.DH_CLIENT.value:
+            logger.error(f"[{client_id}] Expected DH_CLIENT, got {msg_dict.get('type')}")
+            return
+
+        # Extract client DH public key (A)
+        try:
+            client_dh_g = msg_dict.get('g')
+            client_dh_p_hex = msg_dict.get('p')
+            client_dh_A_hex = msg_dict.get('A')
+            
+            if not all([client_dh_A_hex, client_dh_p_hex, client_dh_g is not None]):
+                logger.error(f"[{client_id}] DH_CLIENT missing required fields")
+                return
+            
+            # Convert hex strings to integers
+            client_dh_A = int(client_dh_A_hex, 16)
+            client_dh_p = int(client_dh_p_hex, 16)
+            
+            logger.debug(f"[{client_id}] Received client DH public key (A) with {client_dh_A.bit_length()} bits")
+        except (ValueError, AttributeError) as e:
+            logger.error(f"[{client_id}] Failed to parse DH_CLIENT: {e}")
+            return
+
+        # Step 6: Generate server DH keypair
+        try:
+            server_dh_private, server_dh_public = generate_dh_keypair()
+            logger.debug(f"[{client_id}] Generated server DH keypair")
+        except Exception as e:
+            logger.error(f"[{client_id}] Failed to generate server DH keypair: {e}")
+            return
+
+        # Step 7: Compute shared secret
+        try:
+            session_key = compute_shared_secret(server_dh_private, client_dh_A)
+            logger.debug(f"[{client_id}] Computed shared secret - session key established")
+            print(f"[{client_id}] [+] DH key agreement successful!")
+            print(f"[{client_id}]     Server DH public key (B): {hex(server_dh_public)[:50]}...")
+            print(f"[{client_id}]     Session AES-128 key derived: {session_key.hex()[:32]}...")
+        except Exception as e:
+            logger.error(f"[{client_id}] Failed to compute shared secret: {e}")
+            return
+
+        # Step 8: Send DH_SERVER with server public key (B)
+        try:
+            dh_server_msg = DHServerMsg(
+                type=MessageType.DH_SERVER.value,
+                B=hex(server_dh_public)
+            )
+            msg_json = serialize_message(dh_server_msg)
+            msg_bytes = msg_json.encode('utf-8')
+            
+            msg_len = len(msg_bytes)
+            client_socket.sendall(
+                msg_len.to_bytes(4, byteorder='big') + msg_bytes
+            )
+            logger.debug(f"[{client_id}] DH_SERVER sent ({msg_len} bytes)")
+            print(f"[{client_id}] [+] Sent DH_SERVER response to client")
+        except Exception as e:
+            logger.error(f"[{client_id}] Failed to send DH_SERVER: {e}")
+            return
+
+        logger.info(f"[{client_id}] DH key agreement complete - ready for encrypted registration/login")
+        print(f"[{client_id}] [*] Waiting for encrypted registration/login data...")
+        # TODO: Implement message handling loop for encrypted data
 
     except socket.timeout:
         logger.warning(f"[{client_id}] Connection timeout")

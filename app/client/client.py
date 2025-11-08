@@ -43,13 +43,17 @@ from dotenv import load_dotenv
 
 # Handle imports whether run as module or script
 try:
-    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message
+    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
+    from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
+    from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
 except ModuleNotFoundError:
     # Add parent directory to path when run as script
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message
+    from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
+    from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
+    from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
 
 
 # Configure logging
@@ -439,6 +443,294 @@ def exchange_certificates(sock: socket.socket, client_cert_pem: str) -> str:
         raise
 
 
+
+
+def perform_dh_exchange(sock: socket.socket) -> bytes:
+    """
+    Perform Diffie-Hellman key agreement with server for session encryption.
+
+    Implements the client side of DH key exchange:
+        1. Generate client DH keypair (a, A)
+        2. Send DH_CLIENT with g, p, and A
+        3. Receive DH_SERVER with server's public key B
+        4. Compute shared secret and derive AES-128 session key
+
+    Args:
+        sock: Connected socket to server
+
+    Returns:
+        bytes: 16-byte AES-128 session key
+
+    Raises:
+        socket.error: If socket operations fail
+        ValueError: If protocol error or invalid DH parameters
+        Exception: For any other errors
+    """
+    try:
+        logger.info("Starting DH key exchange")
+        print("\n[*] Initiating DH key agreement for session encryption...")
+
+        # Step 1: Generate client DH keypair
+        logger.debug("Generating client DH keypair")
+        client_dh_private, client_dh_public = generate_dh_keypair()
+        
+        # Get standard DH parameters
+        p, g = get_dh_params()
+        
+        logger.debug(f"Generated client DH public key with {client_dh_public.bit_length()} bits")
+        print(f"[+] Client DH keypair generated")
+        print(f"    Generator (g): {g}")
+        print(f"    Prime (p): {hex(p)[:50]}...")
+        print(f"    Public key (A): {hex(client_dh_public)[:50]}...")
+
+        # Step 2: Create and send DH_CLIENT message
+        logger.info("Sending DH_CLIENT message")
+        dh_client_msg = DHClientMsg(
+            type=MessageType.DH_CLIENT.value,
+            g=g,
+            p=hex(p),
+            A=hex(client_dh_public)
+        )
+        msg_json = serialize_message(dh_client_msg)
+        msg_bytes = msg_json.encode('utf-8')
+
+        msg_len = len(msg_bytes)
+        sock.sendall(
+            msg_len.to_bytes(4, byteorder='big') + msg_bytes
+        )
+        logger.debug(f"DH_CLIENT sent ({msg_len} bytes)")
+        print(f"[+] Sent DH_CLIENT to server")
+
+        # Step 3: Receive DH_SERVER from server
+        logger.info("Waiting for DH_SERVER message")
+        length_bytes = sock.recv(4)
+        if not length_bytes:
+            logger.error("Server closed connection before sending DH_SERVER")
+            raise socket.error("Server closed connection")
+
+        msg_len = int.from_bytes(length_bytes, byteorder='big')
+        if msg_len > 1024 * 1024:
+            logger.error(f"DH_SERVER message too large: {msg_len} bytes")
+            raise ValueError(f"Message too large: {msg_len} bytes")
+
+        msg_bytes = b''
+        while len(msg_bytes) < msg_len:
+            chunk = sock.recv(msg_len - len(msg_bytes))
+            if not chunk:
+                logger.error("Connection closed while reading DH_SERVER")
+                raise socket.error("Connection closed by server")
+            msg_bytes += chunk
+
+        msg_json = msg_bytes.decode('utf-8')
+        msg_dict = json.loads(msg_json)
+        logger.debug(f"Received message type: {msg_dict.get('type')}")
+
+        # Validate message type
+        if msg_dict.get('type') != MessageType.DH_SERVER.value:
+            logger.error(f"Expected DH_SERVER, got {msg_dict.get('type')}")
+            raise ValueError(f"Unexpected message type: {msg_dict.get('type')}")
+
+        # Step 4: Extract server DH public key (B)
+        try:
+            server_dh_B_hex = msg_dict.get('B')
+            if not server_dh_B_hex:
+                logger.error("DH_SERVER missing B field")
+                raise ValueError("DH_SERVER missing B field")
+            
+            server_dh_public = int(server_dh_B_hex, 16)
+            logger.debug(f"Received server DH public key with {server_dh_public.bit_length()} bits")
+            print(f"[+] Received DH_SERVER from server")
+            print(f"    Server public key (B): {hex(server_dh_public)[:50]}...")
+        except (ValueError, AttributeError) as e:
+            logger.error(f"Failed to parse DH_SERVER: {e}")
+            raise ValueError(f"Invalid DH_SERVER format: {e}")
+
+        # Step 5: Compute shared secret and derive session key
+        try:
+            session_key = compute_shared_secret(client_dh_private, server_dh_public)
+            logger.info("DH key agreement successful - session key derived")
+            print(f"[+] DH key agreement successful!")
+            print(f"[+] Session AES-128 key derived: {session_key.hex()[:32]}...")
+            return session_key
+        except Exception as e:
+            logger.error(f"Failed to compute shared secret: {e}")
+            raise ValueError(f"Key agreement failed: {e}")
+
+    except socket.error as e:
+        logger.error(f"Socket error during DH exchange: {e}")
+        raise
+
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        raise ValueError(f"Invalid JSON in DH_SERVER: {e}")
+
+    except Exception as e:
+        logger.error(f"Error during DH key exchange: {e}")
+        raise
+
+
+def register_user(sock: socket.socket, session_key: bytes):
+    """
+    Perform user registration with encrypted credentials.
+
+    Prompts user for email, username, and password, then encrypts and sends
+    the registration data to the server over the established DH session.
+
+    Args:
+        sock: Connected socket to server
+        session_key: 16-byte AES-128 session key from DH exchange
+
+    Raises:
+        socket.error: If socket operations fail
+        ValueError: If encryption fails
+        Exception: For any other errors
+    """
+    try:
+        print("\n" + "=" * 50)
+        print("Registration")
+        print("=" * 50)
+
+        email = input("Enter email: ").strip()
+        if not email:
+            print("[!] Email cannot be empty")
+            return
+
+        username = input("Enter username: ").strip()
+        if not username:
+            print("[!] Username cannot be empty")
+            return
+
+        password = input("Enter password: ").strip()
+        if not password:
+            print("[!] Password cannot be empty")
+            return
+
+        # Create registration data JSON
+        registration_data = {
+            "email": email,
+            "username": username,
+            "password": password
+        }
+        
+        logger.info(f"Encrypting registration data for user {username}")
+        print(f"\n[*] Encrypting registration data...")
+
+        # Encrypt registration JSON
+        plaintext_json = json.dumps(registration_data)
+        ciphertext = aes_encrypt(plaintext_json, session_key)
+        
+        # Encode ciphertext to base64 for JSON compatibility
+        ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
+        
+        logger.debug(f"Registration data encrypted ({len(ciphertext)} bytes)")
+        print(f"[+] Registration data encrypted: {len(ciphertext)} bytes")
+
+        # Create encrypted registration message
+        encrypted_msg = {
+            "type": "REGISTER_ENCRYPTED",
+            "ciphertext": ciphertext_b64
+        }
+
+        # Send encrypted registration data
+        msg_json = json.dumps(encrypted_msg, separators=(",", ":"))
+        msg_bytes = msg_json.encode('utf-8')
+
+        msg_len = len(msg_bytes)
+        sock.sendall(
+            msg_len.to_bytes(4, byteorder='big') + msg_bytes
+        )
+        
+        logger.info(f"Sent encrypted registration for user {username}")
+        print(f"[+] Sent encrypted registration data to server")
+        print(f"[+] Registration successful!")
+
+    except EOFError:
+        print("\n[*] Registration cancelled")
+    except KeyboardInterrupt:
+        print("\n[*] Registration cancelled")
+    except Exception as e:
+        logger.error(f"Error during registration: {e}")
+        print(f"[!] Registration failed: {e}")
+
+
+def login_user(sock: socket.socket, session_key: bytes):
+    """
+    Perform user login with encrypted credentials.
+
+    Prompts user for email and password, then encrypts and sends
+    the login data to the server over the established DH session.
+
+    Args:
+        sock: Connected socket to server
+        session_key: 16-byte AES-128 session key from DH exchange
+
+    Raises:
+        socket.error: If socket operations fail
+        ValueError: If encryption fails
+        Exception: For any other errors
+    """
+    try:
+        print("\n" + "=" * 50)
+        print("Login")
+        print("=" * 50)
+
+        email = input("Enter email: ").strip()
+        if not email:
+            print("[!] Email cannot be empty")
+            return
+
+        password = input("Enter password: ").strip()
+        if not password:
+            print("[!] Password cannot be empty")
+            return
+
+        # Create login data JSON
+        login_data = {
+            "email": email,
+            "password": password
+        }
+        
+        logger.info(f"Encrypting login data for user {email}")
+        print(f"\n[*] Encrypting login data...")
+
+        # Encrypt login JSON
+        plaintext_json = json.dumps(login_data)
+        ciphertext = aes_encrypt(plaintext_json, session_key)
+        
+        # Encode ciphertext to base64 for JSON compatibility
+        ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
+        
+        logger.debug(f"Login data encrypted ({len(ciphertext)} bytes)")
+        print(f"[+] Login data encrypted: {len(ciphertext)} bytes")
+
+        # Create encrypted login message
+        encrypted_msg = {
+            "type": "LOGIN_ENCRYPTED",
+            "ciphertext": ciphertext_b64
+        }
+
+        # Send encrypted login data
+        msg_json = json.dumps(encrypted_msg, separators=(",", ":"))
+        msg_bytes = msg_json.encode('utf-8')
+
+        msg_len = len(msg_bytes)
+        sock.sendall(
+            msg_len.to_bytes(4, byteorder='big') + msg_bytes
+        )
+        
+        logger.info(f"Sent encrypted login for user {email}")
+        print(f"[+] Sent encrypted login data to server")
+        print(f"[+] Login successful!")
+
+    except EOFError:
+        print("\n[*] Login cancelled")
+    except KeyboardInterrupt:
+        print("\n[*] Login cancelled")
+    except Exception as e:
+        logger.error(f"Error during login: {e}")
+        print(f"[!] Login failed: {e}")
+
+
 def main_menu() -> int:
     """
     Display main menu and get user choice.
@@ -484,7 +776,7 @@ def main():
     Main client entry point.
 
     Loads credentials, connects to server, performs certificate exchange,
-    and presents user menu.
+    conducts DH key agreement, and presents user menu for registration/login.
 
     Exit codes:
         0: Normal shutdown
@@ -508,31 +800,29 @@ def main():
             sock.close()
             sys.exit(1)
 
+        # Perform DH key agreement for session encryption
+        try:
+            session_key = perform_dh_exchange(sock)
+            print("[+] DH key agreement successful")
+        except (socket.error, ValueError) as e:
+            logger.error(f"DH key agreement failed: {e}")
+            print(f"[!] DH key agreement failed: {e}")
+            sock.close()
+            sys.exit(1)
+
+        # Main menu loop
         while True:
             choice = main_menu()
 
             if choice == 1:
                 print("\n[*] Register option selected")
-                print("    TODO: Implement registration protocol")
-                # TODO: Implement registration
-                # Example:
-                # username = input("Enter username: ")
-                # email = input("Enter email: ")
-                # password = input("Enter password: ")
-                # msg = ControlPlaneMsg(type="REGISTER", nonce="...", username=..., password=...)
-                # send_message(sock, serialize_message(msg))
-                # response = receive_message(sock)
+                register_user(sock, session_key)
+                # TODO: Handle server response to registration
 
             elif choice == 2:
                 print("\n[*] Login option selected")
-                print("    TODO: Implement login protocol")
-                # TODO: Implement login
-                # Example:
-                # email = input("Enter email: ")
-                # password = input("Enter password: ")
-                # msg = ControlPlaneMsg(type="LOGIN", nonce="...", username=..., password=...)
-                # send_message(sock, serialize_message(msg))
-                # response = receive_message(sock)
+                login_user(sock, session_key)
+                # TODO: Handle server response to login
 
             elif choice == 3:
                 print("\n[*] Exiting client")
