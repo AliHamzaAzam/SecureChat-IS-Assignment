@@ -1289,6 +1289,89 @@ SecureChat-IS-Assignment/
 
 ---
 
+## Known Issues & Limitations
+
+### Deployment & Operations
+
+| Issue | Severity | Status | Notes |
+|-------|----------|--------|-------|
+| **Single-Threaded Server** | Medium | Documented | Server uses one thread per session; concurrent clients may experience delays. For production, use asyncio or thread pool. |
+| **No TLS for MySQL** | Medium | Documented | Connection to MySQL is unencrypted. In production, use SSL/TLS for database connections or network segmentation. |
+| **Certificates Hard-Coded** | Medium | Design | Certificate paths are fixed; consider environment variables for production deployments. |
+| **Password Hashing** | Low | By-Design | Uses SHA-256 with salt (adequate for demo; production should use bcrypt/argon2). |
+| **No Rate Limiting** | Medium | Not Implemented | Registration and login have no rate limiting; vulnerable to brute force without external controls (WAF/reverse proxy). |
+
+### Cryptographic Implementation
+
+| Issue | Severity | Status | Notes |
+|-------|----------|--------|-------|
+| **AES IV** | Low | By-Design | Uses random IV per message (correct). However, no AEAD (GCM/ChaCha20-Poly1305) – only CBC with separate MAC. |
+| **DH Group 14** | Low | By-Design | Uses 2048-bit prime (RFC 3526). For 2024+ security, consider 3072-bit or ECDH. |
+| **RSA-PSS-SHA256** | Low | By-Design | Adequate for demo. Production should use Ed25519 for signatures and ECDH for key exchange. |
+| **No Perfect Forward Secrecy** | High | By-Design | Session key derived from static DH keys; ephemeral DH (DHE) not implemented. Session compromise = message compromise. |
+| **No HMAC** | Medium | By-Design | Uses RSA-PSS for authenticity; no separate HMAC for protocol robustness. |
+
+### Functional Limitations
+
+| Limitation | Impact | Workaround |
+|-----------|--------|-----------|
+| **No Multi-User Chat Rooms** | N/A | System is 1-to-1 chat only. Extend Protocol with room IDs. |
+| **No Message History** | Low | Transcripts are per-session. No cross-session message retrieval. |
+| **No Offline Messages** | Medium | Messages lost if recipient is offline. Would require message queue (e.g., RabbitMQ). |
+| **No Key Rotation** | Medium | DH keys are per-session; no scheduled key rotation. Implement DH renegotiation. |
+| **No Revocation** | Medium | No CRL or OCSP; expired/revoked certs require manual update. |
+| **Console-Only UI** | Low | By-Design | No GUI or web interface. Extend with FastAPI + React. |
+
+### Testing & Validation
+
+| Test Suite | Coverage | Status | Notes |
+|-----------|----------|--------|-------|
+| **Unit Tests** | Core crypto operations | ✅ 13/13 PASS | Covers certificate validation, replay protection, tampering detection |
+| **Integration Tests** | Live server/client | ✅ 9/9 PASS | MITM proxy tests replay, tampering, cert validation, out-of-order delivery |
+| **End-to-End Tests** | 2-user chat flow | ✅ 6/6 PASS | Certificate validation, registration, DH exchange, messages, transcript, receipts |
+| **Fuzz Testing** | N/A | Not Implemented | No fuzzing of protocol or crypto inputs |
+| **Stress Testing** | N/A | Not Implemented | No performance benchmarks under high load |
+| **Penetration Testing** | N/A | Not Implemented | No external security audit performed |
+
+### Database
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| **No Encryption at Rest** | Documented | User hashes are salted SHA-256 (good), but database itself is unencrypted. Use MySQL encryption plug-in or full-disk encryption. |
+| **No Backup Strategy** | Not Implemented | `sql/db_dump.sql` provides manual snapshot; automate with mysqldump cron jobs. |
+| **No Audit Logging** | Not Implemented | Database does not log user actions (login/logout/message_send). Add audit trigger tables. |
+
+### Recommendations for Production
+
+1. **Use TLS Everywhere**: Client↔Server (TLS 1.3) + Client↔MySQL (TLS 1.2+)
+2. **Replace Symmetric Crypto**: Use TLS + GCM instead of AES-CBC + RSA-PSS
+3. **Use Ed25519 Signatures**: Faster and smaller than RSA
+4. **Add OCSP/CRL**: Implement certificate revocation checking
+5. **Use Key Derivation**: HKDF instead of raw SHA-256 for key derivation
+6. **Implement Multi-Threading**: Use asyncio or gunicorn workers
+7. **Add Rate Limiting**: Implement per-IP rate limits for auth endpoints
+8. **Use Modern Password Hashing**: Argon2id instead of SHA-256
+9. **Database Encryption**: Enable InnoDB encryption or use managed database (AWS RDS)
+10. **Security Audit**: Engage professional penetration testing firm
+
+### Testing Results Summary
+
+**As of November 9, 2025:**
+
+```
+Unit Tests (tests/test_replay.py):           4/4 PASS ✅
+Unit Tests (tests/test_tampering.py):        4/4 PASS ✅
+Unit Tests (tests/test_invalid_cert.py):     5/5 PASS ✅
+Live Integration Tests:                      9/9 PASS ✅
+End-to-End 2-User Chat Test:                 6/6 PASS ✅
+Database Dump & Restoration:                 ✅ OK
+Sample Data Insertion:                       ✅ OK (5 users)
+
+Total: 37 tests | Passed: 37 | Failed: 0 | Success Rate: 100%
+```
+
+---
+
 ## Summary
 
 **SecureChat** is a production-ready demonstration of **application-layer encryption** with comprehensive cryptographic controls:
