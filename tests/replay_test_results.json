@@ -1,0 +1,80 @@
+{
+  "timestamp": "2025-11-09T20:14:41",
+  "summary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "errors": 0
+  },
+  "results": [
+    {
+      "test": "replay_attack",
+      "status": "PASS",
+      "expected": "Replay message should be rejected",
+      "actual": "Message accepted=False, Reason=Replay detected: seqno=3 <= last_received_seqno=5",
+      "replay_detected": true,
+      "captured_seqno": 3,
+      "last_received_seqno": 5,
+      "summary": {
+        "session_name": "test_replay_session",
+        "total_sent": 5,
+        "total_received": 5,
+        "last_received_seqno": 5,
+        "sent_seqnos": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "received_seqnos": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      }
+    },
+    {
+      "test": "sequence_number_ordering",
+      "status": "PASS",
+      "expected": "Out-of-order messages should be rejected",
+      "msg2_replay": {
+        "accepted": false,
+        "reason": "Replay detected: seqno=2 <= last_received_seqno=3"
+      },
+      "msg1_replay": {
+        "accepted": false,
+        "reason": "Replay detected: seqno=1 <= last_received_seqno=3"
+      },
+      "last_received_seqno": 3
+    },
+    {
+      "test": "duplicate_message",
+      "status": "PASS",
+      "expected": "Duplicate message should be rejected",
+      "first_receive": {
+        "accepted": true,
+        "reason": "OK"
+      },
+      "duplicate_receive": {
+        "accepted": false,
+        "reason": "Replay detected: seqno=1 <= last_received_seqno=1"
+      }
+    },
+    {
+      "test": "out_of_order_rejection",
+      "status": "PASS",
+      "expected": "Out-of-order messages should be rejected",
+      "msg3_result": {
+        "accepted": true,
+        "reason": "OK"
+      },
+      "msg2_result_if_msg3_accepted": {
+        "accepted": false,
+        "reason": "Replay detected: seqno=2 <= last_received_seqno=3"
+      }
+    }
+  ]
+}
