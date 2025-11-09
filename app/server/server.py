@@ -634,10 +634,84 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
                     logger.debug(f"[{client_id}] Sent successful login response")
                     print(f"[{client_id}] [+] Sent login response - keeping connection open")
                     
+                    # Initiate chat session DH exchange
+                    logger.info(f"[{client_id}] Initiating chat session DH key exchange")
+                    print(f"[{client_id}] [*] Initiating chat session key exchange...")
+                    
+                    # Generate fresh DH keypair for chat session
+                    chat_dh_private, chat_dh_public = generate_dh_keypair()
+                    logger.debug(f"[{client_id}] Generated fresh DH keypair for chat session")
+                    print(f"[{client_id}] [+] Generated fresh DH keypair")
+                    
+                    # Receive DH_CLIENT from client
+                    logger.info(f"[{client_id}] Waiting for DH_CLIENT from client (chat session)")
+                    length_bytes = client_socket.recv(4)
+                    if not length_bytes:
+                        logger.warning(f"[{client_id}] Client closed connection during chat DH exchange")
+                        return
+                    
+                    msg_len = int.from_bytes(length_bytes, byteorder='big')
+                    if msg_len > 1024 * 1024:
+                        logger.error(f"[{client_id}] DH_CLIENT message too large: {msg_len}")
+                        return
+                    
+                    msg_bytes = b''
+                    while len(msg_bytes) < msg_len:
+                        chunk = client_socket.recv(msg_len - len(msg_bytes))
+                        if not chunk:
+                            logger.error(f"[{client_id}] Connection closed while reading DH_CLIENT")
+                            return
+                        msg_bytes += chunk
+                    
+                    msg_json = msg_bytes.decode('utf-8')
+                    dh_client_msg = json.loads(msg_json)
+                    
+                    if dh_client_msg.get('type') != 'DH_CLIENT':
+                        logger.error(f"[{client_id}] Expected DH_CLIENT, got {dh_client_msg.get('type')}")
+                        return
+                    
+                    client_dh_public = int(dh_client_msg['dh_public'], 16)
+                    logger.debug(f"[{client_id}] Received DH_CLIENT with client public key")
+                    print(f"[{client_id}] [+] Received DH_CLIENT from client")
+                    
+                    # Compute shared secret and derive chat session key
+                    chat_shared_secret = compute_shared_secret(chat_dh_private, client_dh_public)
+                    chat_session_key = chat_shared_secret  # Already 16 bytes from compute_shared_secret
+                    
+                    logger.debug(f"[{client_id}] Chat session key derived: {chat_session_key.hex()[:16]}...")
+                    print(f"[{client_id}] [+] Chat session key derived: {chat_session_key.hex()[:16]}...")
+                    
+                    # Send DH_SERVER with server's public key
+                    dh_server_response = {
+                        "type": "DH_SERVER",
+                        "dh_public": hex(chat_dh_public)
+                    }
+                    
+                    msg_json = json.dumps(dh_server_response)
+                    msg_bytes = msg_json.encode('utf-8')
+                    client_socket.sendall(
+                        len(msg_bytes).to_bytes(4, byteorder='big') + msg_bytes
+                    )
+                    
+                    logger.info(f"[{client_id}] Sent DH_SERVER for chat session")
+                    print(f"[{client_id}] [+] Sent DH_SERVER to client")
+                    
+                    # Initialize chat session state
+                    chat_seqno = 0
+                    logger.info(f"[{client_id}] Chat session established: {username}")
+                    print(f"[{client_id}] [+] Secure chat session established with {username}")
+                    print(f"[{client_id}]     Session key: {chat_session_key.hex()[:16]}...")
+                    print(f"[{client_id}]     Sequence number: {chat_seqno}")
+                    
+                    # TODO: Chat message loop (receive MSG, decrypt, display, handle RECEIPT)
+                    logger.info(f"[{client_id}] Ready to receive chat messages")
+                    
+                    # TODO: Close connection gracefully when chat ends
+                    return
+                    
                     # TODO: Transition to chat session mode (keep connection open)
                     # For now, close the connection gracefully
                     logger.info(f"[{client_id}] Authenticated session - ready for chat messages")
-                    return
                     
                 else:
                     logger.warning(f"[{client_id}] [GATE 2] ✗ Password verification failed for {email}")

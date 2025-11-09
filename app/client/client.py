@@ -705,6 +705,93 @@ def register_user(sock: socket.socket, session_key: bytes):
         print(f"[!] Registration failed: {e}")
 
 
+def perform_chat_dh_exchange(sock: socket.socket) -> bytes:
+    """
+    Perform DH key exchange for chat session (fresh keypair).
+
+    After successful login, initiates a new DH exchange specifically for
+    encrypting chat messages. Uses a fresh keypair separate from the
+    login/registration encryption key.
+
+    Args:
+        sock: Connected socket to server
+
+    Returns:
+        bytes: 16-byte AES-128 chat session key
+
+    Raises:
+        socket.error: If socket operations fail
+        ValueError: If key derivation fails
+    """
+    try:
+        logger.info("Starting chat session DH key exchange")
+        print("\n[*] Initiating chat session key exchange...")
+        
+        # Generate fresh DH keypair for chat session
+        client_private, client_public = generate_dh_keypair()
+        logger.debug("Generated fresh DH keypair for chat session")
+        print("[+] Generated fresh DH keypair")
+        
+        # Send DH_CLIENT with client's public key
+        dh_client_msg = {
+            "type": "DH_CLIENT",
+            "dh_public": hex(client_public)
+        }
+        
+        msg_json = json.dumps(dh_client_msg)
+        msg_bytes = msg_json.encode('utf-8')
+        sock.sendall(
+            len(msg_bytes).to_bytes(4, byteorder='big') + msg_bytes
+        )
+        
+        logger.info("Sent DH_CLIENT for chat session")
+        print("[+] Sent DH_CLIENT to server")
+        
+        # Receive DH_SERVER from server
+        logger.info("Waiting for DH_SERVER from server (chat session)")
+        length_bytes = sock.recv(4)
+        if not length_bytes:
+            logger.error("Server closed connection during chat DH exchange")
+            raise socket.error("Server closed connection")
+        
+        msg_len = int.from_bytes(length_bytes, byteorder='big')
+        if msg_len > 1024 * 1024:
+            logger.error(f"DH_SERVER message too large: {msg_len}")
+            raise ValueError(f"Message too large: {msg_len}")
+        
+        msg_bytes = b''
+        while len(msg_bytes) < msg_len:
+            chunk = sock.recv(msg_len - len(msg_bytes))
+            if not chunk:
+                logger.error("Connection closed while reading DH_SERVER")
+                raise socket.error("Connection closed by server")
+            msg_bytes += chunk
+        
+        msg_json = msg_bytes.decode('utf-8')
+        dh_server_msg = json.loads(msg_json)
+        
+        if dh_server_msg.get('type') != 'DH_SERVER':
+            logger.error(f"Expected DH_SERVER, got {dh_server_msg.get('type')}")
+            raise ValueError(f"Unexpected message type: {dh_server_msg.get('type')}")
+        
+        server_dh_public = int(dh_server_msg['dh_public'], 16)
+        logger.debug("Received DH_SERVER with server public key")
+        print("[+] Received DH_SERVER from server")
+        
+        # Compute shared secret and derive chat session key
+        chat_session_key = compute_shared_secret(client_private, server_dh_public)
+        
+        logger.info(f"Chat session key derived: {chat_session_key.hex()[:16]}...")
+        print(f"[+] Chat session key derived: {chat_session_key.hex()[:16]}...")
+        
+        return chat_session_key
+        
+    except Exception as e:
+        logger.error(f"Chat DH exchange failed: {e}")
+        print(f"[!] Chat key exchange failed: {e}")
+        raise
+
+
 def login_user(sock: socket.socket, session_key: bytes):
     """
     Perform user login with encrypted credentials and dual-gate authentication.
@@ -808,8 +895,20 @@ def login_user(sock: socket.socket, session_key: bytes):
             print(f"\n[+] Login successful!")
             print(f"[+] {message}")
             print(f"[*] Authenticated session established")
-            # TODO: Transition to chat mode
-            return True
+            
+            # Perform chat session DH key exchange
+            try:
+                chat_session_key = perform_chat_dh_exchange(sock)
+                logger.info(f"Chat session established for {username}")
+                print(f"\n[+] Secure chat session established with {username}")
+                print(f"    Session key: {chat_session_key.hex()[:16]}...")
+                print(f"    Ready for chat (sequence number: 0)")
+                # TODO: Enter chat message loop
+                return True
+            except Exception as e:
+                logger.error(f"Failed to establish chat session: {e}")
+                print(f"[!] Failed to establish chat session: {e}")
+                return False
         else:
             logger.warning(f"Login failed for user {email}: {message}")
             print(f"\n[!] Login failed: {message}")
