@@ -193,6 +193,37 @@ def get_signature_algorithm() -> str:
     return "RSA-2048 with SHA-256 and PSS padding (salt_length=32)"
 
 
+def verify_signature_with_pem(
+    data: bytes,
+    signature: bytes,
+    certificate_pem: str,
+) -> bool:
+    """
+    Verify an RSA-PSS signature using a certificate's public key (PEM string version).
+
+    This is a convenience wrapper around verify_signature() that accepts a PEM string
+    instead of an X.509 certificate object.
+
+    Args:
+        data: Original bytes that were signed
+        signature: RSA-PSS signature bytes
+        certificate_pem: X.509 certificate as PEM-encoded string
+
+    Returns:
+        bool: True if signature is valid, False otherwise
+
+    Raises:
+        ValueError: If the certificate PEM is invalid
+    """
+    from app.crypto.cert_validator import load_certificate_from_pem_string
+    
+    try:
+        certificate = load_certificate_from_pem_string(certificate_pem)
+        return verify_signature(data, signature, certificate)
+    except Exception as e:
+        raise ValueError(f"Failed to verify signature: {e}")
+
+
 def get_key_size_bits(key: Union[rsa.RSAPrivateKey, rsa.RSAPublicKey]) -> int:
     """
     Get the key size in bits.

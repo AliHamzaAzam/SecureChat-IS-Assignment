@@ -105,6 +105,34 @@ def load_private_key(key_path: str, password: Optional[bytes] = None) -> rsa.RSA
         raise ValueError(f"Error loading private key: {e}")
 
 
+def load_private_key_from_pem_string(pem_string: str, password: Optional[bytes] = None) -> rsa.RSAPrivateKey:
+    """
+    Load a private key from a PEM-encoded string.
+
+    Args:
+        pem_string: PEM-encoded private key as string
+        password: Optional password for encrypted keys (None for unencrypted)
+
+    Returns:
+        Loaded RSA private key object
+
+    Raises:
+        ValueError: If the string is not a valid PEM private key
+    """
+    try:
+        key_pem = pem_string.encode('utf-8')
+        private_key = load_pem_private_key(key_pem, password=password)
+        
+        if not isinstance(private_key, rsa.RSAPrivateKey):
+            raise ValueError("Only RSA private keys are supported")
+        
+        return private_key
+    except ValueError as e:
+        raise ValueError(f"Invalid PEM private key format: {e}")
+    except Exception as e:
+        raise ValueError(f"Error loading private key: {e}")
+
+
 def validate_certificate(cert: x509.Certificate, 
                         ca_cert: x509.Certificate) -> Tuple[bool, Optional[str]]:
     """

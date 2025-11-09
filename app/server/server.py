@@ -43,6 +43,7 @@ try:
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_decrypt
+    from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256
     from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
 except ModuleNotFoundError:
@@ -51,6 +52,7 @@ except ModuleNotFoundError:
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_decrypt
+    from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256
     from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
 
@@ -75,6 +77,174 @@ SERVER_KEY_PATH = CERT_DIR / "server_key.pem"
 
 # Global flag for graceful shutdown
 shutdown_flag = False
+
+
+def load_server_credentials():
+    """
+    Load server certificate and private key from disk.
+
+    Reads PEM-formatted certificate and private key files from the certs/ directory.
+    These are used for authentication with clients.
+
+    Returns:
+        Tuple of (cert_pem: str, key_pem: str)
+        - cert_pem: PEM-encoded X.509 certificate
+        - key_pem: PEM-encoded RSA private key
+
+    Raises:
+        FileNotFoundError: If certificate or key files don't exist
+        IOError: If files cannot be read
+
+    Example:
+        >>> cert, key = load_server_credentials()
+        >>> "BEGIN CERTIFICATE" in cert
+        True
+    """
+    try:
+        with open(SERVER_CERT_PATH, "r") as f:
+            cert_pem = f.read()
+        with open(SERVER_KEY_PATH, "r") as f:
+            key_pem = f.read()
+        logger.debug("Server credentials loaded from disk")
+        return cert_pem, key_pem
+    except FileNotFoundError as e:
+        logger.critical(f"Server credentials not found: {e}")
+        raise
+
+
+def receive_chat_messages(client_socket: socket.socket, client_id: str, username: str, 
+                          chat_session_key: bytes, client_cert_pem: str):
+    """
+    Receive and process encrypted chat messages from client.
+
+    Implements message reception loop with:
+    - Sequence number replay protection
+    - RSA-PSS signature verification
+    - AES-128-CBC decryption
+    - Message display
+
+    Args:
+        client_socket: Connected socket to client
+        client_id: Client identifier for logging
+        username: Authenticated username
+        chat_session_key: 16-byte AES-128 chat session key
+        client_cert_pem: PEM-encoded client certificate for signature verification
+
+    Raises:
+        socket.error: If socket operations fail
+    """
+    try:
+        logger.info(f"[{client_id}] Entering message reception loop for {username}")
+        print(f"[{client_id}] [*] Waiting for chat messages from {username}...")
+        
+        last_seqno = 0
+        
+        while True:
+            try:
+                # Receive message
+                length_bytes = client_socket.recv(4)
+                if not length_bytes:
+                    logger.info(f"[{client_id}] Client closed connection")
+                    print(f"[{client_id}] [*] Client disconnected")
+                    break
+                
+                msg_len = int.from_bytes(length_bytes, byteorder='big')
+                if msg_len > 10 * 1024 * 1024:  # 10MB max
+                    logger.error(f"[{client_id}] Message too large: {msg_len}")
+                    break
+                
+                msg_bytes = b''
+                while len(msg_bytes) < msg_len:
+                    chunk = client_socket.recv(msg_len - len(msg_bytes))
+                    if not chunk:
+                        logger.error(f"[{client_id}] Connection closed while reading message")
+                        return
+                    msg_bytes += chunk
+                
+                msg_json = msg_bytes.decode('utf-8')
+                msg_dict = json.loads(msg_json)
+                
+                # Validate message type
+                if msg_dict.get('type') != 'MSG':
+                    logger.warning(f"[{client_id}] Expected MSG, got {msg_dict.get('type')}")
+                    continue
+                
+                # Extract message fields
+                seqno = msg_dict.get('seqno')
+                ts = msg_dict.get('ts')
+                ct_b64 = msg_dict.get('ct')
+                sig_b64 = msg_dict.get('sig')
+                
+                if not all([seqno, ts, ct_b64, sig_b64]):
+                    logger.error(f"[{client_id}] Incomplete message fields")
+                    continue
+                
+                logger.debug(f"[{client_id}] Received message: seqno={seqno}, ts={ts}")
+                
+                # CHECK 1: Replay protection - seqno must be > last received
+                if seqno <= last_seqno:
+                    logger.warning(f"[{client_id}] Replay detected: seqno={seqno}, last={last_seqno}")
+                    print(f"[{client_id}] [!] REPLAY attack detected (seqno={seqno})")
+                    continue
+                
+                # Decode ciphertext and signature
+                try:
+                    ciphertext = base64.b64decode(ct_b64)
+                    signature = base64.b64decode(sig_b64)
+                except Exception as e:
+                    logger.error(f"[{client_id}] Failed to decode base64: {e}")
+                    continue
+                
+                # CHECK 2: Signature verification
+                # Compute digest: SHA256(seqno || ts || ciphertext)
+                digest_data = (
+                    seqno.to_bytes(4, byteorder='big') +
+                    ts.to_bytes(8, byteorder='big') +
+                    ciphertext
+                )
+                digest = compute_sha256(digest_data)
+                
+                try:
+                    # Verify signature using client's certificate public key
+                    is_valid = verify_signature_with_pem(digest, signature, client_cert_pem)
+                    if not is_valid:
+                        logger.warning(f"[{client_id}] Signature verification failed")
+                        print(f"[{client_id}] [!] SIG_FAIL - Signature invalid (seqno={seqno})")
+                        continue
+                except Exception as e:
+                    logger.error(f"[{client_id}] Signature verification error: {e}")
+                    print(f"[{client_id}] [!] SIG_FAIL - Verification error: {e}")
+                    continue
+                
+                logger.debug(f"[{client_id}] Signature verified for seqno={seqno}")
+                
+                # Decrypt message
+                try:
+                    plaintext_bytes = aes_decrypt(ciphertext, chat_session_key)
+                    plaintext = plaintext_bytes.decode('utf-8')
+                except Exception as e:
+                    logger.error(f"[{client_id}] Decryption failed: {e}")
+                    print(f"[{client_id}] [!] Decryption failed")
+                    continue
+                
+                # Update sequence number tracker
+                last_seqno = seqno
+                
+                # Display message
+                logger.info(f"[{client_id}] [{username}]: {plaintext}")
+                print(f"[{client_id}] [{username}]: {plaintext}")
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"[{client_id}] Failed to parse message JSON: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"[{client_id}] Error processing message: {e}")
+                continue
+    
+    except KeyboardInterrupt:
+        logger.info(f"[{client_id}] Message loop interrupted")
+    except Exception as e:
+        logger.error(f"[{client_id}] Message loop error: {e}")
 
 
 def load_server_credentials():
@@ -703,15 +873,11 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
                     print(f"[{client_id}]     Session key: {chat_session_key.hex()[:16]}...")
                     print(f"[{client_id}]     Sequence number: {chat_seqno}")
                     
-                    # TODO: Chat message loop (receive MSG, decrypt, display, handle RECEIPT)
-                    logger.info(f"[{client_id}] Ready to receive chat messages")
+                    # Receive and process chat messages
+                    receive_chat_messages(client_socket, client_id, username, chat_session_key, client_cert_pem)
                     
-                    # TODO: Close connection gracefully when chat ends
+                    logger.info(f"[{client_id}] Chat session ended for {username}")
                     return
-                    
-                    # TODO: Transition to chat session mode (keep connection open)
-                    # For now, close the connection gracefully
-                    logger.info(f"[{client_id}] Authenticated session - ready for chat messages")
                     
                 else:
                     logger.warning(f"[{client_id}] [GATE 2] ✗ Password verification failed for {email}")

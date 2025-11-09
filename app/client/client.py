@@ -39,15 +39,17 @@ import logging
 import secrets
 import base64
 import hashlib
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Handle imports whether run as module or script
 try:
     from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
-    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
+    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate, load_private_key_from_pem_string
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
+    from app.crypto.rsa_signer import sign_data, compute_sha256
 except ModuleNotFoundError:
     # Add parent directory to path when run as script
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -705,6 +707,112 @@ def register_user(sock: socket.socket, session_key: bytes):
         print(f"[!] Registration failed: {e}")
 
 
+def chat_message_loop(sock: socket.socket, chat_session_key: bytes, username: str, key_pem: str):
+    """
+    Main chat loop: read messages, encrypt, sign, and send to server.
+
+    Reads user input, encrypts with chat session key, creates RSA-PSS signature,
+    and sends ChatMsg with sequence number and timestamp for replay protection.
+
+    Args:
+        sock: Connected socket to server
+        chat_session_key: 16-byte AES-128 chat session key
+        username: Authenticated username for display
+        key_pem: PEM-encoded client private key for signing
+
+    Raises:
+        socket.error: If socket operations fail
+        Exception: For any other errors
+    """
+    try:
+        logger.info(f"Entering chat loop for {username}")
+        print("\n[*] Enter messages to send (type 'exit' to disconnect)")
+        print("=" * 50)
+        
+        # Load private key for signing
+        try:
+            private_key = load_private_key_from_pem_string(key_pem)
+        except Exception as e:
+            logger.error(f"Failed to load private key for signing: {e}")
+            print(f"[!] Error: Could not load signing key: {e}")
+            return
+        
+        seqno = 0
+        
+        while True:
+            try:
+                # Read message from user
+                message = input(f"[{username}]: ").strip()
+                
+                if message.lower() == 'exit':
+                    logger.info(f"User {username} exiting chat")
+                    print("[*] Disconnecting...")
+                    break
+                
+                if not message:
+                    continue
+                
+                # Encrypt message
+                plaintext = message.encode('utf-8')
+                ciphertext = aes_encrypt(plaintext, chat_session_key)
+                ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
+                
+                # Increment sequence number
+                seqno += 1
+                
+                # Get current timestamp (milliseconds)
+                ts = int(time.time() * 1000)
+                
+                # Compute digest: SHA256(seqno || timestamp || ciphertext)
+                digest_data = (
+                    seqno.to_bytes(4, byteorder='big') +
+                    ts.to_bytes(8, byteorder='big') +
+                    ciphertext
+                )
+                digest = compute_sha256(digest_data)
+                
+                # Sign digest with private key
+                signature = sign_data(digest, private_key)
+                signature_b64 = base64.b64encode(signature).decode('utf-8')
+                
+                logger.debug(f"Message encrypted and signed (seqno={seqno})")
+                
+                # Create ChatMsg
+                chat_msg = {
+                    "type": "MSG",
+                    "seqno": seqno,
+                    "ts": ts,
+                    "ct": ciphertext_b64,
+                    "sig": signature_b64
+                }
+                
+                # Send to server
+                msg_json = json.dumps(chat_msg)
+                msg_bytes = msg_json.encode('utf-8')
+                sock.sendall(
+                    len(msg_bytes).to_bytes(4, byteorder='big') + msg_bytes
+                )
+                
+                logger.info(f"Sent encrypted message (seqno={seqno}, ts={ts})")
+                print(f"[+] Sent (seqno={seqno})")
+                
+            except KeyboardInterrupt:
+                logger.info(f"User {username} interrupted chat")
+                print("\n[*] Disconnecting...")
+                break
+            except EOFError:
+                logger.info(f"User {username} closed input")
+                print("[*] Disconnecting...")
+                break
+            except Exception as e:
+                logger.error(f"Error sending message: {e}")
+                print(f"[!] Error: {e}")
+    
+    except Exception as e:
+        logger.error(f"Chat loop error: {e}")
+        print(f"[!] Chat error: {e}")
+
+
 def perform_chat_dh_exchange(sock: socket.socket) -> bytes:
     """
     Perform DH key exchange for chat session (fresh keypair).
@@ -792,7 +900,7 @@ def perform_chat_dh_exchange(sock: socket.socket) -> bytes:
         raise
 
 
-def login_user(sock: socket.socket, session_key: bytes):
+def login_user(sock: socket.socket, session_key: bytes, key_pem: str):
     """
     Perform user login with encrypted credentials and dual-gate authentication.
 
@@ -903,7 +1011,9 @@ def login_user(sock: socket.socket, session_key: bytes):
                 print(f"\n[+] Secure chat session established with {username}")
                 print(f"    Session key: {chat_session_key.hex()[:16]}...")
                 print(f"    Ready for chat (sequence number: 0)")
-                # TODO: Enter chat message loop
+                
+                # Enter chat message loop
+                chat_message_loop(sock, chat_session_key, username, key_pem)
                 return True
             except Exception as e:
                 logger.error(f"Failed to establish chat session: {e}")
@@ -1016,7 +1126,7 @@ def main():
 
             elif choice == 2:
                 print("\n[*] Login option selected")
-                login_user(sock, session_key)
+                login_user(sock, session_key, key_pem)
                 # TODO: Handle server response to login
 
             elif choice == 3:
