@@ -1,0 +1,56 @@
+{
+  "timestamp": "2025-11-09T20:22:44",
+  "total_tests": 4,
+  "passed": 4,
+  "failed": 0,
+  "errors": 0,
+  "results": [
+    {
+      "test": "ciphertext_tampering",
+      "status": "PASS",
+      "description": "Ciphertext bit-flipped: ZW5jcnlwdGVkX3NlY3JldF9kYXRhX2hl... \u2192 ZG5jcnlwdGVkX3NlY3JldF9kYXRhX2hl...",
+      "original_ct": "ZW5jcnlwdGVkX3NlY3JldF9kYXRhX2hlcmU=",
+      "tampered_ct": "ZG5jcnlwdGVkX3NlY3JldF9kYXRhX2hlcmU=",
+      "original_digest_valid": false,
+      "tampered_digest_valid": false,
+      "expected": "Tampered signature should fail",
+      "actual": "Verification: False, Reason: Signature verification failed: digest mismatch",
+      "receiver_response": "SIG_FAIL"
+    },
+    {
+      "test": "timestamp_tampering",
+      "status": "PASS",
+      "description": "Timestamp modified: 1762701764296 \u2192 1762701765296",
+      "original_ts": 1762701764296,
+      "tampered_ts": 1762701765296,
+      "original_digest_valid": true,
+      "tampered_digest_valid": false,
+      "expected": "Tampered timestamp should cause signature failure",
+      "actual": "Verification: False, Reason: Signature verification failed: digest mismatch",
+      "receiver_response": "SIG_FAIL"
+    },
+    {
+      "test": "seqno_tampering",
+      "status": "PASS",
+      "description": "Sequence number modified: 5 \u2192 6",
+      "original_seqno": 5,
+      "tampered_seqno": 6,
+      "original_digest_valid": true,
+      "tampered_digest_valid": false,
+      "expected": "Tampered seqno should cause signature failure",
+      "actual": "Verification: False, Reason: Signature verification failed: digest mismatch",
+      "receiver_response": "SIG_FAIL"
+    },
+    {
+      "test": "multiple_bit_flips",
+      "status": "PASS",
+      "description": "Flipped 2 bits in ciphertext at different positions",
+      "bit_flips": 2,
+      "original_digest_valid": true,
+      "tampered_digest_valid": false,
+      "expected": "Multiple bit flips should cause signature failure",
+      "actual": "Verification: False, Reason: Signature verification failed: digest mismatch",
+      "receiver_response": "SIG_FAIL"
+    }
+  ]
+}

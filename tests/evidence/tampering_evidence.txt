@@ -1,0 +1,33 @@
+======================================================================
+TAMPERING & INTEGRITY VERIFICATION TEST EVIDENCE
+======================================================================
+Generated: 2025-11-09 20:22:44
+
+----------------------------------------------------------------------
+Test: ciphertext_tampering
+Status: PASS
+Expected: Tampered signature should fail
+Receiver Response: SIG_FAIL
+Description: Ciphertext bit-flipped: ZW5jcnlwdGVkX3NlY3JldF9kYXRhX2hl... → ZG5jcnlwdGVkX3NlY3JldF9kYXRhX2hl...
+
+----------------------------------------------------------------------
+Test: timestamp_tampering
+Status: PASS
+Expected: Tampered timestamp should cause signature failure
+Receiver Response: SIG_FAIL
+Description: Timestamp modified: 1762701764296 → 1762701765296
+
+----------------------------------------------------------------------
+Test: seqno_tampering
+Status: PASS
+Expected: Tampered seqno should cause signature failure
+Receiver Response: SIG_FAIL
+Description: Sequence number modified: 5 → 6
+
+----------------------------------------------------------------------
+Test: multiple_bit_flips
+Status: PASS
+Expected: Multiple bit flips should cause signature failure
+Receiver Response: SIG_FAIL
+Description: Flipped 2 bits in ciphertext at different positions
+
