@@ -33,6 +33,8 @@ import json
 import secrets
 import base64
 import hashlib
+import time
+import threading
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -40,19 +42,19 @@ from dotenv import load_dotenv
 # Handle imports whether run as module or script
 try:
     from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
-    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
+    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate, load_private_key_from_pem_string
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
-    from app.crypto.aes_crypto import aes_decrypt
-    from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256
+    from app.crypto.aes_crypto import aes_decrypt, aes_encrypt
+    from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256, sign_data
     from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
-    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
+    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate, load_private_key_from_pem_string
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
-    from app.crypto.aes_crypto import aes_decrypt
-    from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256
+    from app.crypto.aes_crypto import aes_decrypt, aes_encrypt
+    from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256, sign_data
     from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
 
@@ -220,8 +222,7 @@ def receive_chat_messages(client_socket: socket.socket, client_id: str, username
                 
                 # Decrypt message
                 try:
-                    plaintext_bytes = aes_decrypt(ciphertext, chat_session_key)
-                    plaintext = plaintext_bytes.decode('utf-8')
+                    plaintext = aes_decrypt(ciphertext, chat_session_key)
                 except Exception as e:
                     logger.error(f"[{client_id}] Decryption failed: {e}")
                     print(f"[{client_id}] [!] Decryption failed")
@@ -234,6 +235,9 @@ def receive_chat_messages(client_socket: socket.socket, client_id: str, username
                 logger.info(f"[{client_id}] [{username}]: {plaintext}")
                 print(f"[{client_id}] [{username}]: {plaintext}")
                 
+            except socket.timeout:
+                # Timeout is normal in non-blocking mode, just continue
+                continue
             except json.JSONDecodeError as e:
                 logger.error(f"[{client_id}] Failed to parse message JSON: {e}")
                 continue
@@ -245,6 +249,120 @@ def receive_chat_messages(client_socket: socket.socket, client_id: str, username
         logger.info(f"[{client_id}] Message loop interrupted")
     except Exception as e:
         logger.error(f"[{client_id}] Message loop error: {e}")
+
+
+def send_chat_message_loop(client_socket: socket.socket, client_id: str, username: str,
+                          chat_session_key: bytes, server_key_pem: str, server_cert_pem: str):
+    """
+    Server console input loop: read messages, encrypt, sign, and send to client.
+
+    Reads server console input, encrypts with chat session key, creates RSA-PSS signature,
+    and sends ChatMsg with sequence number and timestamp for replay protection.
+
+    Args:
+        client_socket: Connected socket to client
+        client_id: Client identifier for logging
+        username: Authenticated client username for display
+        chat_session_key: 16-byte AES-128 chat session key
+        server_key_pem: PEM-encoded server private key for signing
+        server_cert_pem: PEM-encoded server certificate (for display/logging)
+
+    Raises:
+        socket.error: If socket operations fail
+        Exception: For any other errors
+    """
+    try:
+        logger.info(f"[{client_id}] Server sending messages to {username}")
+        print(f"[{client_id}] [*] Enter messages for {username} (type 'exit' to stop sending)")
+        
+        # Load private key for signing
+        try:
+            server_private_key = load_private_key_from_pem_string(server_key_pem)
+        except Exception as e:
+            logger.error(f"[{client_id}] Failed to load server private key: {e}")
+            print(f"[{client_id}] [!] Error: Could not load server signing key: {e}")
+            return
+        
+        seqno = 0
+        
+        while True:
+            try:
+                # Read message from server console
+                message = input(f"[Server]: ").strip()
+                
+                if message.lower() == 'exit':
+                    logger.info(f"[{client_id}] Server stopping message sending to {username}")
+                    print(f"[{client_id}] [*] Stopping message sending")
+                    break
+                
+                if not message:
+                    continue
+                
+                # Encrypt message (aes_encrypt expects str, returns bytes)
+                ciphertext = aes_encrypt(message, chat_session_key)
+                ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
+                
+                # Increment sequence number
+                seqno += 1
+                
+                # Get current timestamp (milliseconds)
+                ts = int(time.time() * 1000)
+                
+                # Compute digest: SHA256(seqno || timestamp || ciphertext)
+                digest_data = (
+                    seqno.to_bytes(4, byteorder='big') +
+                    ts.to_bytes(8, byteorder='big') +
+                    ciphertext
+                )
+                digest = compute_sha256(digest_data)
+                
+                # Sign digest with server's private key
+                signature = sign_data(digest, server_private_key)
+                signature_b64 = base64.b64encode(signature).decode('utf-8')
+                
+                logger.debug(f"[{client_id}] Message encrypted and signed (seqno={seqno})")
+                
+                # Create ChatMsg
+                chat_msg = {
+                    "type": "MSG",
+                    "seqno": seqno,
+                    "ts": ts,
+                    "ct": ciphertext_b64,
+                    "sig": signature_b64
+                }
+                
+                # Send to client
+                msg_json = json.dumps(chat_msg)
+                msg_bytes = msg_json.encode('utf-8')
+                client_socket.sendall(
+                    len(msg_bytes).to_bytes(4, byteorder='big') + msg_bytes
+                )
+                
+                logger.info(f"[{client_id}] Server sent encrypted message (seqno={seqno}, ts={ts})")
+                print(f"[{client_id}] [+] Server sent (seqno={seqno})")
+                
+            except KeyboardInterrupt:
+                logger.info(f"[{client_id}] Server interrupted")
+                print(f"\n[{client_id}] [*] Interrupted")
+                break
+            except EOFError:
+                logger.info(f"[{client_id}] Server input closed")
+                print(f"[{client_id}] [*] Input closed")
+                break
+            except socket.timeout:
+                # Timeout is normal in non-blocking mode, just continue
+                continue
+            except socket.error as e:
+                logger.error(f"[{client_id}] Network error sending message: {e}")
+                print(f"[{client_id}] [!] Network error: {e}")
+                break
+            except Exception as e:
+                logger.error(f"[{client_id}] Error sending message: {e}")
+                print(f"[{client_id}] [!] Error: {e}")
+    
+    except Exception as e:
+        logger.error(f"[{client_id}] Server message loop error: {e}")
+        print(f"[{client_id}] [!] Server message loop error: {e}")
 
 
 def load_server_credentials():
@@ -294,7 +412,7 @@ def load_server_credentials():
         raise
 
 
-def handle_client(client_socket: socket.socket, client_address: tuple, server_cert_pem: str):
+def handle_client(client_socket: socket.socket, client_address: tuple, server_cert_pem: str, server_key_pem: str):
     """
     Handle a single client connection with certificate validation.
 
@@ -308,6 +426,7 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
         client_socket: Connected socket for the client
         client_address: Tuple of (client_ip, client_port)
         server_cert_pem: Server's PEM-encoded certificate
+        server_key_pem: Server's PEM-encoded private key for signing messages
 
     Raises:
         socket.error: If socket operations fail
@@ -873,8 +992,24 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
                     print(f"[{client_id}]     Session key: {chat_session_key.hex()[:16]}...")
                     print(f"[{client_id}]     Sequence number: {chat_seqno}")
                     
-                    # Receive and process chat messages
-                    receive_chat_messages(client_socket, client_id, username, chat_session_key, client_cert_pem)
+                    # Set socket timeout for both threads to avoid blocking forever
+                    client_socket.settimeout(1.0)
+                    
+                    # Start receiving messages in a thread
+                    receive_thread = threading.Thread(
+                        target=receive_chat_messages,
+                        args=(client_socket, client_id, username, chat_session_key, client_cert_pem),
+                        daemon=False
+                    )
+                    receive_thread.start()
+                    
+                    # Run server message sending loop (blocks until exit)
+                    send_chat_message_loop(client_socket, client_id, username, chat_session_key, server_key_pem, server_cert_pem)
+                    
+                    # Wait for receive thread to finish
+                    receive_thread.join(timeout=5)
+                    if receive_thread.is_alive():
+                        logger.warning(f"[{client_id}] Receive thread still running, closing socket")
                     
                     logger.info(f"[{client_id}] Chat session ended for {username}")
                     return
@@ -1035,7 +1170,7 @@ def start_server():
                     continue
 
                 # Handle the client connection
-                handle_client(client_socket, client_address, cert_pem)
+                handle_client(client_socket, client_address, cert_pem, key_pem)
 
             except Exception as e:
                 if not shutdown_flag:

@@ -40,6 +40,7 @@ import secrets
 import base64
 import hashlib
 import time
+import threading
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -49,14 +50,15 @@ try:
     from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate, load_private_key_from_pem_string
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
-    from app.crypto.rsa_signer import sign_data, compute_sha256
+    from app.crypto.rsa_signer import sign_data, compute_sha256, verify_signature_with_pem
 except ModuleNotFoundError:
     # Add parent directory to path when run as script
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
-    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate
+    from app.crypto.cert_validator import load_certificate, load_certificate_from_pem_string, validate_certificate, load_private_key_from_pem_string
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
+    from app.crypto.rsa_signer import sign_data, compute_sha256, verify_signature_with_pem
 
 
 # Configure logging
@@ -707,6 +709,140 @@ def register_user(sock: socket.socket, session_key: bytes):
         print(f"[!] Registration failed: {e}")
 
 
+def receive_server_messages(sock: socket.socket, chat_session_key: bytes, server_cert_pem: str):
+    """
+    Receive and process encrypted messages from server.
+
+    Runs in a separate thread to receive server messages while client sends messages.
+    Implements message reception with:
+    - Sequence number replay protection
+    - RSA-PSS signature verification using server certificate
+    - AES-128-CBC decryption
+    - Message display
+
+    Args:
+        sock: Connected socket to server
+        chat_session_key: 16-byte AES-128 chat session key
+        server_cert_pem: PEM-encoded server certificate for signature verification
+
+    Raises:
+        socket.error: If socket operations fail
+    """
+    try:
+        logger.info("Starting server message receiver thread")
+        
+        last_seqno = 0
+        
+        while True:
+            try:
+                # Receive message length
+                length_bytes = sock.recv(4)
+                if not length_bytes:
+                    logger.info("Server closed connection")
+                    break
+                
+                msg_len = int.from_bytes(length_bytes, byteorder='big')
+                if msg_len > 10 * 1024 * 1024:  # 10MB max
+                    logger.error(f"Message too large: {msg_len}")
+                    break
+                
+                # Receive message data
+                msg_bytes = b''
+                while len(msg_bytes) < msg_len:
+                    chunk = sock.recv(msg_len - len(msg_bytes))
+                    if not chunk:
+                        logger.error("Connection closed while reading message")
+                        return
+                    msg_bytes += chunk
+                
+                msg_json = msg_bytes.decode('utf-8')
+                msg_dict = json.loads(msg_json)
+                
+                # Validate message type - skip non-MSG messages (like login_response)
+                if msg_dict.get('type') != 'MSG':
+                    logger.debug(f"Skipping non-MSG message type: {msg_dict.get('type')}")
+                    continue
+                
+                # Extract message fields
+                seqno = msg_dict.get('seqno')
+                ts = msg_dict.get('ts')
+                ct_b64 = msg_dict.get('ct')
+                sig_b64 = msg_dict.get('sig')
+                
+                if not all([seqno, ts, ct_b64, sig_b64]):
+                    logger.error("Incomplete message fields")
+                    continue
+                
+                logger.debug(f"Received message: seqno={seqno}, ts={ts}")
+                
+                # CHECK 1: Replay protection - seqno must be > last received
+                if seqno <= last_seqno:
+                    logger.warning(f"[REPLAY] seqno={seqno}, last={last_seqno}")
+                    print(f"[!] REPLAY attack detected (seqno={seqno})")
+                    continue
+                
+                # Decode ciphertext and signature
+                try:
+                    ciphertext = base64.b64decode(ct_b64)
+                    signature = base64.b64decode(sig_b64)
+                except Exception as e:
+                    logger.error(f"Failed to decode base64: {e}")
+                    continue
+                
+                # CHECK 2: Signature verification
+                # Compute digest: SHA256(seqno || ts || ciphertext)
+                digest_data = (
+                    seqno.to_bytes(4, byteorder='big') +
+                    ts.to_bytes(8, byteorder='big') +
+                    ciphertext
+                )
+                digest = compute_sha256(digest_data)
+                
+                try:
+                    # Verify signature using server's certificate public key
+                    is_valid = verify_signature_with_pem(digest, signature, server_cert_pem)
+                    if not is_valid:
+                        logger.warning(f"Signature verification failed")
+                        print(f"[!] SIG_FAIL - Signature invalid (seqno={seqno})")
+                        continue
+                except Exception as e:
+                    logger.error(f"Signature verification error: {e}")
+                    print(f"[!] SIG_FAIL - Verification error: {e}")
+                    continue
+                
+                logger.debug(f"Signature verified for seqno={seqno}")
+                
+                # Decrypt message
+                try:
+                    plaintext = aes_decrypt(ciphertext, chat_session_key)
+                except Exception as e:
+                    logger.error(f"Decryption failed: {e}")
+                    print(f"[!] Decryption failed")
+                    continue
+                
+                # Update sequence number tracker
+                last_seqno = seqno
+                
+                # Display message
+                logger.info(f"[Server]: {plaintext}")
+                print(f"[Server]: {plaintext}")
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse message JSON: {e}")
+                continue
+            except socket.error as e:
+                logger.error(f"Network error receiving message: {e}")
+                break
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+                continue
+    
+    except KeyboardInterrupt:
+        logger.info("Receiver interrupted")
+    except Exception as e:
+        logger.error(f"Receiver thread error: {e}")
+
+
 def chat_message_loop(sock: socket.socket, chat_session_key: bytes, username: str, key_pem: str):
     """
     Main chat loop: read messages, encrypt, sign, and send to server.
@@ -752,9 +888,8 @@ def chat_message_loop(sock: socket.socket, chat_session_key: bytes, username: st
                 if not message:
                     continue
                 
-                # Encrypt message
-                plaintext = message.encode('utf-8')
-                ciphertext = aes_encrypt(plaintext, chat_session_key)
+                # Encrypt message (aes_encrypt expects str, returns bytes)
+                ciphertext = aes_encrypt(message, chat_session_key)
                 ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
                 
                 # Increment sequence number
@@ -900,7 +1035,7 @@ def perform_chat_dh_exchange(sock: socket.socket) -> bytes:
         raise
 
 
-def login_user(sock: socket.socket, session_key: bytes, key_pem: str):
+def login_user(sock: socket.socket, session_key: bytes, key_pem: str, server_cert_pem: str):
     """
     Perform user login with encrypted credentials and dual-gate authentication.
 
@@ -910,6 +1045,8 @@ def login_user(sock: socket.socket, session_key: bytes, key_pem: str):
     Args:
         sock: Connected socket to server
         session_key: 16-byte AES-128 session key from DH exchange
+        key_pem: PEM-encoded client private key for message signing
+        server_cert_pem: PEM-encoded server certificate for verifying server messages
 
     Raises:
         socket.error: If socket operations fail
@@ -1012,8 +1149,24 @@ def login_user(sock: socket.socket, session_key: bytes, key_pem: str):
                 print(f"    Session key: {chat_session_key.hex()[:16]}...")
                 print(f"    Ready for chat (sequence number: 0)")
                 
-                # Enter chat message loop
+                # Enter chat message loop with receive thread
+                
+                # Start receiving messages in a thread
+                receive_thread = threading.Thread(
+                    target=receive_server_messages,
+                    args=(sock, chat_session_key, server_cert_pem),
+                    daemon=False
+                )
+                receive_thread.start()
+                
+                # Run client message sending loop (blocks until exit)
                 chat_message_loop(sock, chat_session_key, username, key_pem)
+                
+                # Wait for receive thread to finish
+                receive_thread.join(timeout=5)
+                if receive_thread.is_alive():
+                    logger.warning("Receive thread still running")
+                
                 return True
             except Exception as e:
                 logger.error(f"Failed to establish chat session: {e}")
@@ -1126,7 +1279,7 @@ def main():
 
             elif choice == 2:
                 print("\n[*] Login option selected")
-                login_user(sock, session_key, key_pem)
+                login_user(sock, session_key, key_pem, server_cert_pem)
                 # TODO: Handle server response to login
 
             elif choice == 3:
