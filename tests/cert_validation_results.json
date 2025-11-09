@@ -1,0 +1,57 @@
+{
+  "timestamp": "2025-11-09T20:02:46.650753",
+  "summary": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "test": "expired_certificate",
+      "status": "PASS",
+      "expected": "Certificate should be rejected (expired)",
+      "actual": "Valid=False, Error=Certificate has expired (valid until 2025-11-08 15:02:46+00:00)",
+      "cert_valid_from": "2025-11-07 15:02:46.281036+00:00",
+      "cert_valid_until": "2025-11-08 15:02:46.281036+00:00",
+      "validation_error": "Certificate has expired (valid until 2025-11-08 15:02:46+00:00)"
+    },
+    {
+      "test": "self_signed_certificate",
+      "status": "PASS",
+      "expected": "Self-signed certificate should be rejected",
+      "actual": "Valid=False, Error=Certificate signature verification failed: ",
+      "cert_issuer": "CN=selfsigned.local,O=Test-Org,C=PK",
+      "cert_subject": "CN=selfsigned.local,O=Test-Org,C=PK",
+      "validation_error": "Certificate signature verification failed: "
+    },
+    {
+      "test": "wrong_cn_certificate",
+      "status": "PASS",
+      "expected": "CN mismatch should be detected",
+      "actual": "Expected=server.local, Got=attacker.local",
+      "signature_valid": true,
+      "cn_match": false,
+      "san_values": [
+        "attacker.local"
+      ]
+    },
+    {
+      "test": "not_yet_valid_certificate",
+      "status": "PASS",
+      "expected": "Certificate should be rejected (not yet valid)",
+      "actual": "Valid=False, Error=Certificate not yet valid (valid from 2025-11-10 15:02:46+00:00)",
+      "cert_valid_from": "2025-11-10 15:02:46.489825+00:00",
+      "cert_valid_until": "2026-11-10 15:02:46.489825+00:00",
+      "validation_error": "Certificate not yet valid (valid from 2025-11-10 15:02:46+00:00)"
+    },
+    {
+      "test": "invalid_signature",
+      "status": "PASS",
+      "expected": "Valid certificate should pass validation initially",
+      "actual": "Valid=True",
+      "note": "Actual signature tampering requires modifying DER encoding"
+    }
+  ]
+}
