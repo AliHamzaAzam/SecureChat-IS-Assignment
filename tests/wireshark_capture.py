@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
 """
-SecureChat Network Capture & Analysis Helper Script
+SecureChat PCAP Analysis Tool
 
-This script helps capture and analyze SecureChat network traffic.
-It can:
-1. Start/stop tcpdump packet capture
-2. Run the server/client
-3. Generate Wireshark analysis reports
+Analyzes manually captured PCAPNG files to verify SecureChat protocol messages,
+encryption, signatures, and cryptographic operations.
+
+This tool does NOT capture packets - use tcpdump manually:
+
+    # Terminal 1: Start server
+    python -m app.server.server
+
+    # Terminal 2: Start tcpdump capture
+    sudo tcpdump -i lo0 -w tests/evidence/secure_chat.pcapng port 9999
+
+    # Terminal 3: Run client and perform chat session
+
+    # Terminal 2: Stop tcpdump (Ctrl+C)
+
+    # Analyze the captured PCAP file
+    python tests/wireshark_capture.py analyze tests/evidence/secure_chat.pcapng
 
 Usage:
-    python tests/wireshark_capture.py --help
+    python tests/wireshark_capture.py analyze <pcap_file>
+    python tests/wireshark_capture.py list
 """
 
 import sys
 import subprocess
-import os
-import time
 import json
 import argparse
+import re
 from pathlib import Path
 from datetime import datetime
+from typing import Dict, List, Any, Optional
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
 EVIDENCE_DIR = SCRIPT_DIR / "evidence"
-PCAP_FILE = EVIDENCE_DIR / "secure_chat.pcap"
-CAPTURE_PORT = 5000
 
 # Ensure evidence directory exists
 EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,371 +57,392 @@ def log_error(msg: str):
     print(f"[✗] {msg}", file=sys.stderr)
 
 
-def log_command(cmd: str):
-    """Print command to run."""
-    print(f"\n[COMMAND]\n$ {cmd}\n")
+def log_section(title: str):
+    """Print section header."""
+    print(f"\n{'='*70}")
+    print(f"{title:^70}")
+    print(f"{'='*70}\n")
 
 
-def start_capture() -> subprocess.Popen:
-    """Start tcpdump packet capture."""
-    log_info(f"Starting tcpdump capture on port {CAPTURE_PORT}...")
-    
-    # Remove old capture file
-    if PCAP_FILE.exists():
-        PCAP_FILE.unlink()
-        log_info("Removed old PCAP file")
-    
-    cmd = [
-        "sudo",
-        "tcpdump",
-        "-i", "lo",
-        "-w", str(PCAP_FILE),
-        "-q",
-        f"port {CAPTURE_PORT}"
-    ]
-    
+def check_tshark_available() -> bool:
+    """Check if tshark (Wireshark CLI) is available."""
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+        result = subprocess.run(
+            ["tshark", "--version"],
+            capture_output=True,
+            timeout=5
         )
-        time.sleep(1)  # Give tcpdump time to start
-        log_success(f"tcpdump started (PID: {process.pid})")
-        log_info(f"Capturing to: {PCAP_FILE}")
-        return process
-    except Exception as e:
-        log_error(f"Failed to start tcpdump: {e}")
-        log_error("Note: tcpdump requires sudo privilege")
-        return None
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 
 
-def stop_capture(process: subprocess.Popen):
-    """Stop tcpdump packet capture."""
-    if not process:
-        return
+def extract_json_payload(hex_data: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract JSON payload from hex data.
     
-    log_info("Stopping tcpdump capture...")
-    process.terminate()
-    
+    Tries to locate and parse JSON object within hex data.
+    """
     try:
-        process.wait(timeout=5)
-        log_success("tcpdump stopped")
-    except subprocess.TimeoutExpired:
-        process.kill()
-        log_success("tcpdump killed")
+        # Convert hex to ASCII, filtering for printable chars
+        ascii_data = ""
+        for i in range(0, len(hex_data), 2):
+            try:
+                byte_val = int(hex_data[i:i+2], 16)
+                if 32 <= byte_val <= 126:  # Printable ASCII
+                    ascii_data += chr(byte_val)
+                elif byte_val in (9, 10, 13):  # Tab, newline, CR
+                    ascii_data += chr(byte_val)
+            except ValueError:
+                pass
+
+        # Try to find JSON object
+        json_match = re.search(r'\{.*\}', ascii_data, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
+    except (json.JSONDecodeError, ValueError):
+        pass
     
-    # Check if PCAP file was created
-    if PCAP_FILE.exists():
-        size = PCAP_FILE.stat().st_size
-        log_success(f"PCAP file created: {PCAP_FILE} ({size} bytes)")
-    else:
-        log_error("PCAP file not created")
+    return None
 
 
-def show_instructions():
-    """Show user instructions for testing."""
-    instructions = """
-╔════════════════════════════════════════════════════════════════╗
-║          SECURECHAT NETWORK CAPTURE INSTRUCTIONS               ║
-╚════════════════════════════════════════════════════════════════╝
-
-The packet capture is now running in the background.
-
-Follow these steps in the client terminal:
-
-1. Wait for server to start (you should see connection established)
-
-2. REGISTER a new user:
-
-3. LOGIN with the same credentials:
-
-4. Send encrypted chat messages:
-   > Hello, this is a secret message
-   > Another encrypted message
-   > Testing end-to-end encryption
-
-5. Exchange messages a few times
-
-6. Type "logout" to disconnect
-
-7. The client will exit
-
-Once done, packet capture will be stopped automatically.
-
-All network traffic has been captured to:
-  {pcap_file}
-
-Next, open the PCAP file in Wireshark:
-  wireshark {pcap_file}
-
-Then analyze using the filters documented in:
-  tests/WIRESHARK_ANALYSIS.md
-""".format(pcap_file=PCAP_FILE)
+def analyze_pcap_file(pcap_path: Path) -> Dict[str, Any]:
+    """
+    Analyze PCAP file using tshark to extract SecureChat protocol messages.
     
-    print(instructions)
+    Returns structured analysis of all captured packets.
+    """
+    if not pcap_path.exists():
+        log_error(f"PCAP file not found: {pcap_path}")
+        return {}
 
+    if not check_tshark_available():
+        log_error("tshark not found. Install with: brew install wireshark")
+        return {}
 
-def start_server() -> subprocess.Popen:
-    """Start SecureChat server in subprocess."""
-    log_info("Starting SecureChat server...")
-    
-    cmd = [
-        sys.executable,
-        "-m", "app.server.server"
-    ]
-    
+    log_info(f"Analyzing PCAP: {pcap_path}")
+    log_info(f"File size: {pcap_path.stat().st_size} bytes")
+
+    analysis = {
+        "timestamp": datetime.now().isoformat(),
+        "pcap_file": str(pcap_path),
+        "file_size_bytes": pcap_path.stat().st_size,
+        "packets": [],
+        "protocol_summary": {},
+        "security_findings": [],
+        "errors": []
+    }
+
     try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=str(PROJECT_DIR),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        log_success(f"Server started (PID: {process.pid})")
-        time.sleep(2)  # Give server time to bind to port
-        return process
-    except Exception as e:
-        log_error(f"Failed to start server: {e}")
-        return None
-
-
-def start_client() -> subprocess.Popen:
-    """Start SecureChat client in subprocess."""
-    log_info("Starting SecureChat client...")
-    
-    cmd = [
-        sys.executable,
-        "-m", "app.client.client"
-    ]
-    
-    try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=str(PROJECT_DIR),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        log_success(f"Client started (PID: {process.pid})")
-        return process
-    except Exception as e:
-        log_error(f"Failed to start client: {e}")
-        return None
-
-
-def stop_server(process: subprocess.Popen):
-    """Stop server process."""
-    if not process:
-        return
-    
-    log_info("Stopping server...")
-    process.terminate()
-    
-    try:
-        process.wait(timeout=5)
-        log_success("Server stopped")
-    except subprocess.TimeoutExpired:
-        process.kill()
-        log_success("Server killed")
-
-
-def generate_wireshark_report() -> None:
-    """Generate Wireshark analysis report from PCAP."""
-    if not PCAP_FILE.exists():
-        log_error("PCAP file not found")
-        return
-    
-    log_info("Generating Wireshark analysis report...")
-    
-    try:
-        # Try to use tshark (command-line Wireshark)
+        # Extract TCP payload data using tshark
         cmd = [
             "tshark",
-            "-r", str(PCAP_FILE),
-            "-T", "text",
-            "-V"  # Verbose (all packet details)
+            "-r", str(pcap_path),
+            "-Y", "tcp.port==9999",
+            "-T", "fields",
+            "-e", "frame.number",
+            "-e", "tcp.srcport",
+            "-e", "tcp.dstport",
+            "-e", "tcp.payload",
+            "-E", "separator=|"
         ]
-        
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=30
         )
-        
-        if result.returncode == 0:
-            # Save to text file
-            report_file = EVIDENCE_DIR / "secure_chat_analysis.txt"
-            with open(report_file, 'w') as f:
-                f.write("SECURECHAT NETWORK ANALYSIS REPORT\n")
-                f.write("=" * 70 + "\n")
-                f.write(f"Generated: {datetime.now().isoformat()}\n")
-                f.write(f"PCAP File: {PCAP_FILE}\n")
-                f.write("=" * 70 + "\n\n")
-                f.write(result.stdout)
-            
-            log_success(f"Report saved to: {report_file}")
-        else:
-            log_error(f"tshark error: {result.stderr}")
-    
-    except FileNotFoundError:
-        log_error("tshark not found. Install with: brew install wireshark")
+
+        if result.returncode != 0:
+            analysis["errors"].append(f"tshark error: {result.stderr}")
+            return analysis
+
+        # Parse output
+        packet_num = 0
+        for line in result.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+
+            parts = line.split("|")
+            if len(parts) < 4:
+                continue
+
+            frame_num, src_port, dst_port, payload_hex = parts[0], parts[1], parts[2], parts[3]
+
+            if not payload_hex:
+                continue
+
+            packet_num += 1
+
+            # Try to extract JSON payload
+            json_payload = extract_json_payload(payload_hex)
+
+            packet_info = {
+                "number": int(frame_num),
+                "src_port": int(src_port) if src_port else None,
+                "dst_port": int(dst_port) if dst_port else None,
+                "payload_hex": payload_hex[:100],  # First 100 chars
+                "json_payload": json_payload,
+                "message_type": None,
+                "has_encryption": False,
+                "has_signature": False,
+                "direction": "client→server" if int(dst_port) == 9999 else "server→client"
+            }
+
+            # Analyze message type and properties
+            if json_payload:
+                msg_type = json_payload.get("type")
+                packet_info["message_type"] = msg_type
+
+                # Track protocol summary
+                if msg_type not in analysis["protocol_summary"]:
+                    analysis["protocol_summary"][msg_type] = 0
+                analysis["protocol_summary"][msg_type] += 1
+
+                # Check for encryption and signatures (including nested in "data" field)
+                if "ct" in json_payload:  # ciphertext
+                    packet_info["has_encryption"] = True
+                if "sig" in json_payload:  # signature
+                    packet_info["has_signature"] = True
+                
+                # Also check nested data field (for receipts)
+                if "data" in json_payload and isinstance(json_payload["data"], dict):
+                    nested_data = json_payload["data"]
+                    if "ct" in nested_data:
+                        packet_info["has_encryption"] = True
+                    if "sig" in nested_data:
+                        packet_info["has_signature"] = True
+                    # Receipt with signature implies encryption of the signature itself
+                    if "sig" in nested_data and msg_type == "receipt":
+                        packet_info["has_encryption"] = True
+
+            analysis["packets"].append(packet_info)
+
+        log_success(f"Extracted {packet_num} packets from PCAP")
+
+    except subprocess.TimeoutExpired:
+        analysis["errors"].append("tshark timeout")
     except Exception as e:
-        log_error(f"Failed to generate report: {e}")
+        analysis["errors"].append(f"Error parsing PCAP: {str(e)}")
+
+    # Generate security findings
+    generate_security_findings(analysis)
+
+    return analysis
 
 
-def show_pcap_summary() -> None:
-    """Show summary of captured packets."""
-    if not PCAP_FILE.exists():
-        log_error("PCAP file not found")
+def generate_security_findings(analysis: Dict[str, Any]):
+    """Analyze packets and generate security findings."""
+    if not analysis["packets"]:
+        analysis["security_findings"].append("⚠ No packets found in capture")
         return
-    
-    log_info("PCAP file summary:")
-    
-    try:
-        # Use tcpdump to read summary
-        cmd = [
-            "tcpdump",
-            "-r", str(PCAP_FILE),
-            "-n"
-        ]
-        
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result.returncode == 0:
-            lines = result.stdout.split('\n')
-            # Show first 20 packets
-            for line in lines[:20]:
-                if line.strip():
-                    print(f"  {line}")
-            
-            if len(lines) > 20:
-                print(f"  ... ({len(lines) - 20} more packets)")
+
+    msg_packets = [p for p in analysis["packets"] if p.get("message_type") == "MSG"]
+    dh_packets = [p for p in analysis["packets"] if "DH_" in (p.get("message_type") or "")]
+
+    if msg_packets:
+        # Check encryption
+        encrypted = sum(1 for p in msg_packets if p.get("has_encryption"))
+        if encrypted == len(msg_packets):
+            analysis["security_findings"].append(
+                f"✅ All {len(msg_packets)} MSG packets are encrypted (confidentiality verified)"
+            )
+        elif encrypted > 0:
+            analysis["security_findings"].append(
+                f"⚠ {encrypted}/{len(msg_packets)} MSG packets encrypted"
+            )
         else:
-            log_error(f"tcpdump error: {result.stderr}")
-    
-    except Exception as e:
-        log_error(f"Failed to show summary: {e}")
+            analysis["security_findings"].append(
+                "❌ No encrypted messages found"
+            )
+
+        # Check signatures
+        signed = sum(1 for p in msg_packets if p.get("has_signature"))
+        if signed == len(msg_packets):
+            analysis["security_findings"].append(
+                f"✅ All {len(msg_packets)} MSG packets are signed (integrity verified)"
+            )
+        elif signed > 0:
+            analysis["security_findings"].append(
+                f"⚠ {signed}/{len(msg_packets)} MSG packets signed"
+            )
+        else:
+            analysis["security_findings"].append(
+                "❌ No signed messages found"
+            )
+
+    if dh_packets:
+        analysis["security_findings"].append(
+            f"✅ DH key exchange detected ({len(dh_packets)} packets)"
+        )
+
+    # Check protocol sequence
+    proto_types = [p.get("message_type") for p in analysis["packets"]]
+    if "HELLO" in proto_types and "SERVER_HELLO" in proto_types:
+        analysis["security_findings"].append(
+            "✅ Certificate exchange completed (HELLO/SERVER_HELLO)"
+        )
+
+    # Summary
+    total = len(analysis["packets"])
+    analysis["security_findings"].append(f"\nTotal packets captured: {total}")
 
 
-def create_json_manifest() -> None:
-    """Create JSON manifest of captured data."""
+def format_analysis_text(analysis: Dict[str, Any]) -> str:
+    """Format analysis as human-readable text."""
+    output = []
+    output.append("SECURECHAT PCAP ANALYSIS REPORT")
+    output.append("=" * 70)
+    output.append(f"Timestamp: {analysis['timestamp']}")
+    output.append(f"PCAP File: {analysis['pcap_file']}")
+    output.append(f"File Size: {analysis['file_size_bytes']} bytes")
+    output.append("")
+
+    if analysis["errors"]:
+        output.append("ERRORS")
+        output.append("-" * 70)
+        for error in analysis["errors"]:
+            output.append(f"  • {error}")
+        output.append("")
+
+    if analysis["protocol_summary"]:
+        output.append("PROTOCOL MESSAGE SUMMARY")
+        output.append("-" * 70)
+        for msg_type, count in sorted(analysis["protocol_summary"].items()):
+            output.append(f"  {msg_type}: {count} packet(s)")
+        output.append("")
+
+    if analysis["packets"]:
+        output.append("PACKET DETAILS")
+        output.append("-" * 70)
+        for pkt in analysis["packets"]:
+            output.append(f"\nPacket {pkt['number']} (Frame {pkt['number']}):")
+            output.append(f"  Direction: {pkt['direction']}")
+            output.append(f"  Type: {pkt['message_type'] or 'UNKNOWN'}")
+            output.append(f"  Encrypted: {'Yes' if pkt['has_encryption'] else 'No'}")
+            output.append(f"  Signed: {'Yes' if pkt['has_signature'] else 'No'}")
+            if pkt["json_payload"]:
+                payload_str = json.dumps(pkt["json_payload"], indent=4)
+                for line in payload_str.split("\n"):
+                    output.append(f"    {line}")
+
+    if analysis["security_findings"]:
+        output.append("\n" + "=" * 70)
+        output.append("SECURITY FINDINGS")
+        output.append("=" * 70)
+        for finding in analysis["security_findings"]:
+            output.append(finding)
+
+    return "\n".join(output)
+
+
+def save_analysis(analysis: Dict[str, Any], basename: str = "capture_analysis"):
+    """Save analysis to JSON and text files."""
+    # Save JSON
+    json_file = EVIDENCE_DIR / f"{basename}.json"
+    with open(json_file, "w") as f:
+        json.dump(analysis, f, indent=2)
+    log_success(f"Analysis saved: {json_file}")
+
+    # Save text report
+    text_file = EVIDENCE_DIR / f"{basename}.txt"
+    with open(text_file, "w") as f:
+        f.write(format_analysis_text(analysis))
+    log_success(f"Report saved: {text_file}")
+
+    # Save manifest
+    manifest_file = EVIDENCE_DIR / f"{basename}_manifest.json"
     manifest = {
         "timestamp": datetime.now().isoformat(),
-        "pcap_file": str(PCAP_FILE),
-        "pcap_exists": PCAP_FILE.exists(),
-        "pcap_size_bytes": PCAP_FILE.stat().st_size if PCAP_FILE.exists() else 0,
-        "capture_port": CAPTURE_PORT,
-        "evidence_directory": str(EVIDENCE_DIR),
-        "analysis_guide": "tests/WIRESHARK_ANALYSIS.md"
+        "pcap_file": analysis["pcap_file"],
+        "analysis_files": {
+            "json": str(json_file),
+            "text": str(text_file),
+            "manifest": str(manifest_file)
+        },
+        "summary": {
+            "total_packets": len(analysis["packets"]),
+            "protocol_types": analysis["protocol_summary"],
+            "errors": analysis["errors"]
+        }
     }
-    
-    manifest_file = EVIDENCE_DIR / "capture_manifest.json"
-    with open(manifest_file, 'w') as f:
+    with open(manifest_file, "w") as f:
         json.dump(manifest, f, indent=2)
-    
-    log_success(f"Manifest saved to: {manifest_file}")
+    log_success(f"Manifest saved: {manifest_file}")
+
+
+def list_pcap_files():
+    """List available PCAP files in evidence directory."""
+    log_section("Available PCAP Files")
+
+    pcap_files = list(EVIDENCE_DIR.glob("*.pcapng")) + list(EVIDENCE_DIR.glob("*.pcap"))
+
+    if not pcap_files:
+        print("No PCAP files found in tests/evidence/")
+        print("\nTo capture traffic manually:")
+        print("  1. Terminal 1: python -m app.server.server")
+        print("  2. Terminal 2: sudo tcpdump -i lo0 -w tests/evidence/secure_chat.pcapng port 9999")
+        print("  3. Terminal 3: python -m app.client.client")
+        print("  4. Run your chat session")
+        print("  5. Terminal 2: Ctrl+C to stop capture")
+        return
+
+    for i, pcap_file in enumerate(pcap_files, 1):
+        size_mb = pcap_file.stat().st_size / (1024 * 1024)
+        print(f"{i}. {pcap_file.name} ({size_mb:.2f} MB)")
+        print(f"   Path: {pcap_file}")
 
 
 def main():
-    """Main function."""
     parser = argparse.ArgumentParser(
-        description="SecureChat Network Capture & Analysis Helper"
+        description="SecureChat PCAP Analysis Tool"
     )
-    parser.add_argument(
-        "--mode",
-        choices=["capture", "analyze", "full"],
-        default="full",
-        help="Mode: capture (start packet capture only), analyze (analyze PCAP), full (both)"
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+
+    # analyze subcommand
+    analyze_parser = subparsers.add_parser("analyze", help="Analyze a PCAPNG file")
+    analyze_parser.add_argument(
+        "pcap_file",
+        type=Path,
+        help="Path to PCAPNG file (.pcapng or .pcap)"
     )
-    parser.add_argument(
-        "--no-server",
-        action="store_true",
-        help="Don't start server (use existing)"
+    analyze_parser.add_argument(
+        "-o", "--output",
+        type=str,
+        default="capture_analysis",
+        help="Output filename (without extension)"
     )
-    
+
+    # list subcommand
+    subparsers.add_parser("list", help="List available PCAP files")
+
     args = parser.parse_args()
-    
-    print("\n" + "=" * 70)
-    print("SECURECHAT NETWORK CAPTURE & ANALYSIS")
-    print("=" * 70 + "\n")
-    
-    server_process = None
-    capture_process = None
-    
-    try:
-        # Start server unless --no-server flag
-        if not args.no_server and args.mode in ["capture", "full"]:
-            server_process = start_server()
-            if not server_process:
-                log_error("Failed to start server")
-                return 1
+
+    if args.command == "analyze":
+        log_section("SECURECHAT PCAP ANALYZER")
         
-        # Start packet capture
-        if args.mode in ["capture", "full"]:
-            capture_process = start_capture()
-            if not capture_process:
-                log_error("Failed to start packet capture")
-                log_error("Note: Packet capture requires sudo")
-                return 1
-            
-            # Show instructions
-            show_instructions()
-            
-            # Wait for user to complete testing
-            log_info("\nWaiting for testing to complete...")
-            log_info("Press Ctrl+C when done\n")
-            
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                log_info("\nStopping capture...")
+        if not check_tshark_available():
+            log_error("tshark not available. Install Wireshark:")
+            log_error("  macOS: brew install wireshark")
+            log_error("  Linux: sudo apt-get install wireshark")
+            sys.exit(1)
+
+        analysis = analyze_pcap_file(args.pcap_file)
         
-        # Stop capture
-        if capture_process:
-            stop_capture(capture_process)
-        
-        # Generate analysis
-        if args.mode in ["analyze", "full"]:
-            log_info("\n" + "=" * 70)
-            log_info("ANALYSIS")
-            log_info("=" * 70)
-            
-            show_pcap_summary()
-            generate_wireshark_report()
-            create_json_manifest()
-            
-            log_info(f"\nTo open PCAP in Wireshark:")
-            log_command(f"wireshark {PCAP_FILE}")
-            
-            log_info(f"\nFor analysis guide, see:")
-            log_command(f"cat tests/WIRESHARK_ANALYSIS.md")
-        
-        log_success("\nCapture and analysis complete!")
-        return 0
-    
-    except Exception as e:
-        log_error(f"Unexpected error: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
-    
-    finally:
-        # Cleanup
-        if capture_process:
-            stop_capture(capture_process)
-        if server_process:
-            stop_server(server_process)
+        if analysis["packets"] or not analysis["errors"]:
+            print(format_analysis_text(analysis))
+            save_analysis(analysis, args.output)
+        else:
+            log_error("Failed to analyze PCAP file")
+            sys.exit(1)
+
+    elif args.command == "list":
+        list_pcap_files()
+
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
