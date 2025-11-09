@@ -124,12 +124,16 @@ This creates the necessary tables in MySQL and initializes the database schema.
 
 ## 🔐 Security Features Implemented
 
-- **Confidentiality**: AES-128 ECB mode with PKCS#7 padding
-- **Integrity**: HMAC verification of all messages
-- **Authenticity**: RSA signatures with SHA-256
-- **Non-Repudiation**: Signed session receipts and append-only transcript
-- **Key Exchange**: Diffie-Hellman key agreement
-- **Certificate Validation**: X.509 PKI with Root CA signature verification
+- **Confidentiality**: AES-128-CBC mode with PKCS#7 padding
+- **Integrity**: RSA-PSS signatures with SHA-256 over (seqno || timestamp || ciphertext)
+- **Authenticity**: X.509 PKI-based mutual certificate validation
+- **Non-Repudiation**: 
+  - Append-only session transcripts in `transcripts/{username}_session_{timestamp}.log`
+  - Format: `DIRECTION|seqno|ts|ct_b64|sig_b64|peer_fingerprint`
+  - SHA-256 fingerprint of peer X.509 certificate in each entry
+  - Replay protection via monotonic sequence numbers per direction
+- **Key Exchange**: RFC 3526 Group 14 (2048-bit) Diffie-Hellman
+- **Certificate Validation**: X.509 PKI with Root CA signature, validity, and CN verification
 
 ## 🧪 Testing
 
@@ -164,8 +168,13 @@ See `tests/manual/NOTES.md` for detailed manual testing procedures.
 - **`server.py`**: Server-side session management and message routing
 
 ### Storage
-- **`db.py`**: MySQL connection pooling and user management
-- **`transcript.py`**: Immutable session logs with cryptographic verification
+- **`db.py`**: MySQL connection pooling and user management (salted SHA-256 passwords)
+- **`transcript.py`**: Append-only audit logs with:
+  - `write_transcript_entry()` - Atomic append for SENT/RECV messages
+  - `read_transcript()` - Parse transcript file
+  - `compute_transcript_hash()` - Hash for non-repudiation receipts
+  - Format: `DIRECTION|seqno|ts|ct_b64|sig_b64|peer_sha256_fingerprint`
+  - Both client and server log all encrypted messages to same transcript file
 
 ### Scripts
 - **`gen_ca.py`**: Root CA certificate generation (self-signed X.509)

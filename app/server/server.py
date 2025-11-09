@@ -48,6 +48,7 @@ try:
     from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256, sign_data
     from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
+    from app.storage.transcript import write_transcript_entry
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
@@ -57,6 +58,7 @@ except ModuleNotFoundError:
     from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256, sign_data
     from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
+    from app.storage.transcript import write_transcript_entry
 
 
 # Configure logging
@@ -115,7 +117,7 @@ def load_server_credentials():
 
 
 def receive_chat_messages(client_socket: socket.socket, client_id: str, username: str, 
-                          chat_session_key: bytes, client_cert_pem: str):
+                          chat_session_key: bytes, client_cert_pem: str, session_ts: int):
     """
     Receive and process encrypted chat messages from client.
 
@@ -124,6 +126,7 @@ def receive_chat_messages(client_socket: socket.socket, client_id: str, username
     - RSA-PSS signature verification
     - AES-128-CBC decryption
     - Message display
+    - Append-only transcript logging for non-repudiation
 
     Args:
         client_socket: Connected socket to client
@@ -131,6 +134,7 @@ def receive_chat_messages(client_socket: socket.socket, client_id: str, username
         username: Authenticated username
         chat_session_key: 16-byte AES-128 chat session key
         client_cert_pem: PEM-encoded client certificate for signature verification
+        session_ts: Session start timestamp (ms since epoch) for transcript
 
     Raises:
         socket.error: If socket operations fail
@@ -231,6 +235,23 @@ def receive_chat_messages(client_socket: socket.socket, client_id: str, username
                 # Update sequence number tracker
                 last_seqno = seqno
                 
+                # Write transcript entry (RECV)
+                try:
+                    write_transcript_entry(
+                        username=username,
+                        direction="RECV",
+                        seqno=seqno,
+                        ts=ts,
+                        ct_b64=ct_b64,
+                        sig_b64=sig_b64,
+                        peer_cert_pem=client_cert_pem,
+                        session_ts=session_ts
+                    )
+                    logger.debug(f"[{client_id}] Transcript entry written for RECV message (seqno={seqno})")
+                except Exception as e:
+                    logger.error(f"[{client_id}] Failed to write transcript entry: {e}")
+                    # Continue despite transcript error - don't block message display
+                
                 # Display message
                 logger.info(f"[{client_id}] [{username}]: {plaintext}")
                 print(f"[{client_id}] [{username}]: {plaintext}")
@@ -252,12 +273,14 @@ def receive_chat_messages(client_socket: socket.socket, client_id: str, username
 
 
 def send_chat_message_loop(client_socket: socket.socket, client_id: str, username: str,
-                          chat_session_key: bytes, server_key_pem: str, server_cert_pem: str):
+                          chat_session_key: bytes, server_key_pem: str, server_cert_pem: str,
+                          client_cert_pem: str, session_ts: int):
     """
     Server console input loop: read messages, encrypt, sign, and send to client.
 
     Reads server console input, encrypts with chat session key, creates RSA-PSS signature,
     and sends ChatMsg with sequence number and timestamp for replay protection.
+    Also writes append-only transcript entries for non-repudiation.
 
     Args:
         client_socket: Connected socket to client
@@ -266,6 +289,8 @@ def send_chat_message_loop(client_socket: socket.socket, client_id: str, usernam
         chat_session_key: 16-byte AES-128 chat session key
         server_key_pem: PEM-encoded server private key for signing
         server_cert_pem: PEM-encoded server certificate (for display/logging)
+        client_cert_pem: PEM-encoded client certificate for fingerprinting
+        session_ts: Session start timestamp (ms since epoch) for transcript
 
     Raises:
         socket.error: If socket operations fail
@@ -337,6 +362,23 @@ def send_chat_message_loop(client_socket: socket.socket, client_id: str, usernam
                 client_socket.sendall(
                     len(msg_bytes).to_bytes(4, byteorder='big') + msg_bytes
                 )
+                
+                # Write transcript entry (SENT)
+                try:
+                    write_transcript_entry(
+                        username=username,
+                        direction="SENT",
+                        seqno=seqno,
+                        ts=ts,
+                        ct_b64=ciphertext_b64,
+                        sig_b64=signature_b64,
+                        peer_cert_pem=client_cert_pem,
+                        session_ts=session_ts
+                    )
+                    logger.debug(f"[{client_id}] Transcript entry written for SENT message (seqno={seqno})")
+                except Exception as e:
+                    logger.error(f"[{client_id}] Failed to write transcript entry: {e}")
+                    # Continue despite transcript error - don't block message sending
                 
                 logger.info(f"[{client_id}] Server sent encrypted message (seqno={seqno}, ts={ts})")
                 print(f"[{client_id}] [+] Server sent (seqno={seqno})")
@@ -987,6 +1029,8 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
                     
                     # Initialize chat session state
                     chat_seqno = 0
+                    session_ts = int(time.time() * 1000)  # Capture session start timestamp for transcript
+                    
                     logger.info(f"[{client_id}] Chat session established: {username}")
                     print(f"[{client_id}] [+] Secure chat session established with {username}")
                     print(f"[{client_id}]     Session key: {chat_session_key.hex()[:16]}...")
@@ -998,13 +1042,13 @@ def handle_client(client_socket: socket.socket, client_address: tuple, server_ce
                     # Start receiving messages in a thread
                     receive_thread = threading.Thread(
                         target=receive_chat_messages,
-                        args=(client_socket, client_id, username, chat_session_key, client_cert_pem),
+                        args=(client_socket, client_id, username, chat_session_key, client_cert_pem, session_ts),
                         daemon=False
                     )
                     receive_thread.start()
                     
                     # Run server message sending loop (blocks until exit)
-                    send_chat_message_loop(client_socket, client_id, username, chat_session_key, server_key_pem, server_cert_pem)
+                    send_chat_message_loop(client_socket, client_id, username, chat_session_key, server_key_pem, server_cert_pem, client_cert_pem, session_ts)
                     
                     # Wait for receive thread to finish
                     receive_thread.join(timeout=5)

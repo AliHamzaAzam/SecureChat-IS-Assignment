@@ -51,6 +51,7 @@ try:
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
     from app.crypto.rsa_signer import sign_data, compute_sha256, verify_signature_with_pem
+    from app.storage.transcript import write_transcript_entry
 except ModuleNotFoundError:
     # Add parent directory to path when run as script
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -59,6 +60,7 @@ except ModuleNotFoundError:
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
     from app.crypto.rsa_signer import sign_data, compute_sha256, verify_signature_with_pem
+    from app.storage.transcript import write_transcript_entry
 
 
 # Configure logging
@@ -709,7 +711,8 @@ def register_user(sock: socket.socket, session_key: bytes):
         print(f"[!] Registration failed: {e}")
 
 
-def receive_server_messages(sock: socket.socket, chat_session_key: bytes, server_cert_pem: str):
+def receive_server_messages(sock: socket.socket, chat_session_key: bytes, server_cert_pem: str,
+                            username: str, session_ts: int):
     """
     Receive and process encrypted messages from server.
 
@@ -719,11 +722,14 @@ def receive_server_messages(sock: socket.socket, chat_session_key: bytes, server
     - RSA-PSS signature verification using server certificate
     - AES-128-CBC decryption
     - Message display
+    - Append-only transcript logging for non-repudiation
 
     Args:
         sock: Connected socket to server
         chat_session_key: 16-byte AES-128 chat session key
         server_cert_pem: PEM-encoded server certificate for signature verification
+        username: Authenticated username for transcript logging
+        session_ts: Session start timestamp (ms since epoch) for transcript
 
     Raises:
         socket.error: If socket operations fail
@@ -823,6 +829,23 @@ def receive_server_messages(sock: socket.socket, chat_session_key: bytes, server
                 # Update sequence number tracker
                 last_seqno = seqno
                 
+                # Write transcript entry (RECV)
+                try:
+                    write_transcript_entry(
+                        username=username,
+                        direction="RECV",
+                        seqno=seqno,
+                        ts=ts,
+                        ct_b64=ct_b64,
+                        sig_b64=sig_b64,
+                        peer_cert_pem=server_cert_pem,
+                        session_ts=session_ts
+                    )
+                    logger.debug(f"Transcript entry written for RECV message (seqno={seqno})")
+                except Exception as e:
+                    logger.error(f"Failed to write transcript entry: {e}")
+                    # Continue despite transcript error - don't block message display
+                
                 # Display message
                 logger.info(f"[Server]: {plaintext}")
                 print(f"[Server]: {plaintext}")
@@ -843,18 +866,22 @@ def receive_server_messages(sock: socket.socket, chat_session_key: bytes, server
         logger.error(f"Receiver thread error: {e}")
 
 
-def chat_message_loop(sock: socket.socket, chat_session_key: bytes, username: str, key_pem: str):
+def chat_message_loop(sock: socket.socket, chat_session_key: bytes, username: str, key_pem: str,
+                      server_cert_pem: str, session_ts: int):
     """
     Main chat loop: read messages, encrypt, sign, and send to server.
 
     Reads user input, encrypts with chat session key, creates RSA-PSS signature,
     and sends ChatMsg with sequence number and timestamp for replay protection.
+    Also writes append-only transcript entries for non-repudiation.
 
     Args:
         sock: Connected socket to server
         chat_session_key: 16-byte AES-128 chat session key
         username: Authenticated username for display
         key_pem: PEM-encoded client private key for signing
+        server_cert_pem: PEM-encoded server certificate for fingerprinting
+        session_ts: Session start timestamp (ms since epoch) for transcript
 
     Raises:
         socket.error: If socket operations fail
@@ -911,6 +938,23 @@ def chat_message_loop(sock: socket.socket, chat_session_key: bytes, username: st
                 signature_b64 = base64.b64encode(signature).decode('utf-8')
                 
                 logger.debug(f"Message encrypted and signed (seqno={seqno})")
+                
+                # Write transcript entry (SENT)
+                try:
+                    write_transcript_entry(
+                        username=username,
+                        direction="SENT",
+                        seqno=seqno,
+                        ts=ts,
+                        ct_b64=ciphertext_b64,
+                        sig_b64=signature_b64,
+                        peer_cert_pem=server_cert_pem,
+                        session_ts=session_ts
+                    )
+                    logger.debug(f"Transcript entry written for SENT message (seqno={seqno})")
+                except Exception as e:
+                    logger.error(f"Failed to write transcript entry: {e}")
+                    # Continue despite transcript error - don't block message sending
                 
                 # Create ChatMsg
                 chat_msg = {
@@ -1149,18 +1193,21 @@ def login_user(sock: socket.socket, session_key: bytes, key_pem: str, server_cer
                 print(f"    Session key: {chat_session_key.hex()[:16]}...")
                 print(f"    Ready for chat (sequence number: 0)")
                 
+                # Capture session start timestamp for transcript
+                session_ts = int(time.time() * 1000)
+                
                 # Enter chat message loop with receive thread
                 
                 # Start receiving messages in a thread
                 receive_thread = threading.Thread(
                     target=receive_server_messages,
-                    args=(sock, chat_session_key, server_cert_pem),
+                    args=(sock, chat_session_key, server_cert_pem, username, session_ts),
                     daemon=False
                 )
                 receive_thread.start()
                 
                 # Run client message sending loop (blocks until exit)
-                chat_message_loop(sock, chat_session_key, username, key_pem)
+                chat_message_loop(sock, chat_session_key, username, key_pem, server_cert_pem, session_ts)
                 
                 # Wait for receive thread to finish
                 receive_thread.join(timeout=5)
