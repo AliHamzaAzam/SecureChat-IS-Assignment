@@ -23,6 +23,9 @@ __pycache__/
 # Logs
 *.log
 
+# Test evidence and artifacts
+tests/evidence/
+
 # IDE and OS files
 .vscode/
 .idea/
