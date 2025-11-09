@@ -51,7 +51,7 @@ try:
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
     from app.crypto.rsa_signer import sign_data, compute_sha256, verify_signature_with_pem
-    from app.storage.transcript import write_transcript_entry
+    from app.storage.transcript import write_transcript_entry, generate_session_receipt, save_session_receipt, verify_session_receipt
 except ModuleNotFoundError:
     # Add parent directory to path when run as script
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -60,7 +60,7 @@ except ModuleNotFoundError:
     from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret, get_dh_params
     from app.crypto.aes_crypto import aes_encrypt, aes_decrypt
     from app.crypto.rsa_signer import sign_data, compute_sha256, verify_signature_with_pem
-    from app.storage.transcript import write_transcript_entry
+    from app.storage.transcript import write_transcript_entry, generate_session_receipt, save_session_receipt, verify_session_receipt
 
 
 # Configure logging
@@ -764,6 +764,24 @@ def receive_server_messages(sock: socket.socket, chat_session_key: bytes, server
                 msg_json = msg_bytes.decode('utf-8')
                 msg_dict = json.loads(msg_json)
                 
+                # Handle receipt messages (end of session)
+                if msg_dict.get('type') == 'receipt':
+                    logger.info("Received server receipt")
+                    if 'data' in msg_dict:
+                        server_receipt = msg_dict['data']
+                        # Verify server's receipt signature
+                        try:
+                            is_valid = verify_session_receipt(server_receipt, server_cert_pem)
+                            if is_valid:
+                                logger.info("Server receipt verified")
+                                print(f"[+] Server receipt verified (seqno {server_receipt['first_seq']}-{server_receipt['last_seq']})")
+                            else:
+                                logger.warning("Server receipt signature invalid")
+                                print(f"[!] Server receipt signature verification failed")
+                        except Exception as e:
+                            logger.error(f"Error verifying server receipt: {e}")
+                    break  # Exit receive loop after receipt
+                
                 # Validate message type - skip non-MSG messages (like login_response)
                 if msg_dict.get('type') != 'MSG':
                     logger.debug(f"Skipping non-MSG message type: {msg_dict.get('type')}")
@@ -990,6 +1008,40 @@ def chat_message_loop(sock: socket.socket, chat_session_key: bytes, username: st
     except Exception as e:
         logger.error(f"Chat loop error: {e}")
         print(f"[!] Chat error: {e}")
+    
+    # Session closure: generate and exchange receipts
+    try:
+        logger.info(f"Generating session receipt for {username}")
+        print("[*] Generating session receipt...")
+        
+        receipt = generate_session_receipt(
+            username=username,
+            private_key_pem=key_pem,
+            peer_type="client",
+            session_ts=session_ts
+        )
+        
+        # Save receipt to disk
+        save_session_receipt(receipt, username, session_ts)
+        
+        # Send receipt to server
+        receipt_msg = {
+            "type": "receipt",
+            "data": receipt
+        }
+        msg_json = json.dumps(receipt_msg)
+        msg_bytes = msg_json.encode('utf-8')
+        sock.sendall(
+            len(msg_bytes).to_bytes(4, byteorder='big') + msg_bytes
+        )
+        
+        logger.info(f"Session receipt sent to server")
+        print(f"[+] Receipt sent (seqno {receipt['first_seq']}-{receipt['last_seq']})")
+        print("[*] Waiting for server receipt in receive thread...")
+        
+    except Exception as e:
+        logger.error(f"Error during session closure: {e}")
+        print(f"[!] Session closure error: {e}")
 
 
 def perform_chat_dh_exchange(sock: socket.socket) -> bytes:

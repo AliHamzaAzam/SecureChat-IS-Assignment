@@ -300,3 +300,200 @@ def compute_transcript_hash(username: str, session_ts: int = None) -> str:
     hash_obj.update(transcript_data.encode('utf-8'))
     
     return hash_obj.hexdigest()
+
+
+def generate_session_receipt(username: str, private_key_pem: str, peer_type: str,
+                            session_ts: int = None) -> dict:
+    """
+    Generate a signed session receipt for non-repudiation.
+    
+    Computes SHA-256 hash of entire transcript, signs with private key,
+    and creates SessionReceipt containing:
+    - Type: "receipt"
+    - Peer type: "client" or "server"
+    - First/last sequence numbers
+    - Transcript SHA-256 hash
+    - RSA-PSS signature
+    
+    Args:
+        username: Authenticated username
+        private_key_pem: PEM-encoded RSA private key for signing
+        peer_type: "client" or "server" indicating signer's role
+        session_ts: Session start timestamp (ms). If None, uses current time.
+        
+    Returns:
+        Dict with receipt data:
+        {
+            "type": "receipt",
+            "peer": "client" or "server",
+            "username": username,
+            "first_seq": int (lowest seqno across all directions),
+            "last_seq": int (highest seqno across all directions),
+            "transcript_sha256": str (hex-encoded hash),
+            "sig": str (base64-encoded RSA-PSS signature)
+        }
+        
+    Raises:
+        ValueError: If transcript is empty or peer_type invalid
+        Exception: If signing fails
+        
+    Example:
+        >>> receipt = generate_session_receipt(
+        ...     username="alice",
+        ...     private_key_pem=client_key,
+        ...     peer_type="client"
+        ... )
+        >>> print(receipt["type"])
+        "receipt"
+    """
+    import base64
+    
+    # Validate peer type
+    peer_type = peer_type.lower()
+    if peer_type not in ("client", "server"):
+        raise ValueError(f"Invalid peer_type: {peer_type}. Must be 'client' or 'server'")
+    
+    # Read transcript entries
+    entries = read_transcript(username, session_ts)
+    
+    if not entries:
+        raise ValueError(f"Cannot generate receipt: no transcript entries for {username}")
+    
+    # Compute transcript hash
+    transcript_hash = compute_transcript_hash(username, session_ts)
+    
+    # Extract min/max sequence numbers
+    seqnos = [entry["seqno"] for entry in entries]
+    first_seq = min(seqnos)
+    last_seq = max(seqnos)
+    
+    # Load private key and sign
+    try:
+        from app.crypto.cert_validator import load_private_key_from_pem_string
+        from app.crypto.rsa_signer import sign_data
+    except ImportError:
+        raise RuntimeError("Cannot import crypto modules for signing")
+    
+    try:
+        private_key = load_private_key_from_pem_string(private_key_pem)
+    except Exception as e:
+        logger.error(f"Failed to load private key for receipt signing: {e}")
+        raise
+    
+    try:
+        # Sign the transcript hash
+        signature_bytes = sign_data(
+            transcript_hash.encode('utf-8'),
+            private_key
+        )
+        signature_b64 = base64.b64encode(signature_bytes).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Failed to sign receipt: {e}")
+        raise
+    
+    # Create receipt dict
+    receipt = {
+        "type": "receipt",
+        "peer": peer_type,
+        "username": username,
+        "first_seq": first_seq,
+        "last_seq": last_seq,
+        "transcript_sha256": transcript_hash,
+        "sig": signature_b64
+    }
+    
+    logger.debug(f"Generated session receipt for {username} (seqno {first_seq}-{last_seq})")
+    return receipt
+
+
+def save_session_receipt(receipt: dict, username: str, session_ts: int = None) -> Path:
+    """
+    Save session receipt to disk as JSON file.
+    
+    Filename: transcripts/{username}_receipt_{timestamp}.json
+    
+    Args:
+        receipt: Receipt dict from generate_session_receipt()
+        username: Authenticated username
+        session_ts: Session start timestamp (ms). If None, uses current time.
+        
+    Returns:
+        Path to saved receipt file
+        
+    Raises:
+        OSError: If file write fails
+    """
+    import json
+    
+    if session_ts is None:
+        session_ts = int(datetime.now().timestamp() * 1000)
+    
+    # Ensure transcripts directory exists
+    try:
+        ensure_transcripts_dir()
+    except OSError as e:
+        logger.error(f"Cannot save receipt: {e}")
+        raise
+    
+    # Create receipt filename
+    receipt_filename = f"{username}_receipt_{session_ts}.json"
+    receipt_path = TRANSCRIPTS_DIR / receipt_filename
+    
+    # Write receipt to disk
+    try:
+        with open(receipt_path, 'w') as f:
+            json.dump(receipt, f, indent=2)
+        
+        logger.info(f"Session receipt saved: {receipt_path}")
+        return receipt_path
+        
+    except IOError as e:
+        logger.error(f"Failed to save receipt to {receipt_path}: {e}")
+        raise
+
+
+def verify_session_receipt(receipt: dict, peer_cert_pem: str) -> bool:
+    """
+    Verify a session receipt's signature using peer's certificate.
+    
+    Args:
+        receipt: Receipt dict with fields: transcript_sha256, sig, etc.
+        peer_cert_pem: PEM-encoded peer certificate for verification
+        
+    Returns:
+        True if signature valid, False otherwise
+        
+    Raises:
+        ValueError: If receipt fields missing
+        Exception: If verification fails
+    """
+    import base64
+    
+    from app.crypto.rsa_signer import verify_signature_with_pem
+    
+    # Validate receipt structure
+    required_fields = ["transcript_sha256", "sig"]
+    if not all(f in receipt for f in required_fields):
+        raise ValueError(f"Invalid receipt: missing required fields. Has: {list(receipt.keys())}")
+    
+    transcript_hash = receipt["transcript_sha256"]
+    signature_b64 = receipt["sig"]
+    
+    try:
+        signature_bytes = base64.b64decode(signature_b64)
+    except Exception as e:
+        logger.error(f"Failed to decode receipt signature: {e}")
+        return False
+    
+    try:
+        # Verify signature over transcript hash
+        is_valid = verify_signature_with_pem(
+            transcript_hash.encode('utf-8'),
+            signature_bytes,
+            peer_cert_pem
+        )
+        return is_valid
+        
+    except Exception as e:
+        logger.error(f"Receipt verification failed: {e}")
+        return False

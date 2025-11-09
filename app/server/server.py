@@ -48,7 +48,7 @@ try:
     from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256, sign_data
     from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
-    from app.storage.transcript import write_transcript_entry
+    from app.storage.transcript import write_transcript_entry, generate_session_receipt, save_session_receipt, verify_session_receipt
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from app.common.protocol import ControlPlaneMsg, MessageType, serialize_message, deserialize_message, DHClientMsg, DHServerMsg
@@ -58,7 +58,7 @@ except ModuleNotFoundError:
     from app.crypto.rsa_signer import verify_signature_with_pem, compute_sha256, sign_data
     from app.server.registration import register_user, verify_login
     from app.storage.db import get_connection
-    from app.storage.transcript import write_transcript_entry
+    from app.storage.transcript import write_transcript_entry, generate_session_receipt, save_session_receipt, verify_session_receipt
 
 
 # Configure logging
@@ -169,6 +169,24 @@ def receive_chat_messages(client_socket: socket.socket, client_id: str, username
                 
                 msg_json = msg_bytes.decode('utf-8')
                 msg_dict = json.loads(msg_json)
+                
+                # Handle receipt messages (end of session)
+                if msg_dict.get('type') == 'receipt':
+                    logger.info(f"[{client_id}] Received client receipt")
+                    if 'data' in msg_dict:
+                        client_receipt = msg_dict['data']
+                        # Verify client's receipt signature
+                        try:
+                            is_valid = verify_session_receipt(client_receipt, client_cert_pem)
+                            if is_valid:
+                                logger.info(f"[{client_id}] Client receipt verified")
+                                print(f"[{client_id}] [+] Client receipt verified (seqno {client_receipt['first_seq']}-{client_receipt['last_seq']})")
+                            else:
+                                logger.warning(f"[{client_id}] Client receipt signature invalid")
+                                print(f"[{client_id}] [!] Client receipt signature verification failed")
+                        except Exception as e:
+                            logger.error(f"[{client_id}] Error verifying client receipt: {e}")
+                    break  # Exit receive loop after receipt
                 
                 # Validate message type
                 if msg_dict.get('type') != 'MSG':
@@ -403,8 +421,46 @@ def send_chat_message_loop(client_socket: socket.socket, client_id: str, usernam
                 print(f"[{client_id}] [!] Error: {e}")
     
     except Exception as e:
-        logger.error(f"[{client_id}] Server message loop error: {e}")
-        print(f"[{client_id}] [!] Server message loop error: {e}")
+        logger.error(f"[{client_id}] Error in send loop: {e}")
+        print(f"[{client_id}] [!] Send loop error: {e}")
+    
+    # Session closure: generate and exchange receipts
+    try:
+        logger.info(f"[{client_id}] Generating session receipt for {username}")
+        print(f"[{client_id}] [*] Generating session receipt...")
+        
+        receipt = generate_session_receipt(
+            username=username,
+            private_key_pem=server_key_pem,
+            peer_type="server",
+            session_ts=session_ts
+        )
+        
+        # Save receipt to disk
+        save_session_receipt(receipt, username, session_ts)
+        
+        # Send receipt to client
+        receipt_msg = {
+            "type": "receipt",
+            "data": receipt
+        }
+        msg_json = json.dumps(receipt_msg)
+        msg_bytes = msg_json.encode('utf-8')
+        
+        try:
+            client_socket.sendall(
+                len(msg_bytes).to_bytes(4, byteorder='big') + msg_bytes
+            )
+            logger.info(f"[{client_id}] Session receipt sent to client")
+            print(f"[{client_id}] [+] Receipt sent (seqno {receipt['first_seq']}-{receipt['last_seq']})")
+        except socket.error as e:
+            logger.error(f"[{client_id}] Failed to send receipt: {e}")
+        
+        print(f"[{client_id}] [*] Waiting for client receipt in receive thread...")
+        
+    except Exception as e:
+        logger.error(f"[{client_id}] Error during session closure: {e}")
+        print(f"[{client_id}] [!] Session closure error: {e}")
 
 
 def load_server_credentials():
