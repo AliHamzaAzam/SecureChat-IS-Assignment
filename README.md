@@ -64,48 +64,48 @@ docker --version           # Verify Docker is installed
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        SECURECHAT SYSTEM                         │
+│                        SECURECHAT SYSTEM                        │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
+│                                                                 │
 │  ┌──────────────────────┐              ┌──────────────────────┐ │
 │  │   CLIENT MACHINE     │              │   SERVER MACHINE     │ │
 │  │                      │              │                      │ │
-│  │  ┌────────────────┐  │ TCP Port     │  ┌────────────────┐ │ │
-│  │  │ User Interface │  │ 5000 (TCP)   │  │ Session Manager│ │ │
-│  │  │                │  │◄────────────►│  │                │ │ │
-│  │  └────────────────┘  │              │  └────────────────┘ │ │
+│  │  ┌────────────────┐  │ TCP Port     │  ┌────────────────┐  │ │
+│  │  │ User Interface │  │ 5000 (TCP)   │  │ Session Manager│  │ │
+│  │  │                │  │◄────────────►│  │                │  │ │
+│  │  └────────────────┘  │              │  └────────────────┘  │ │
 │  │         ▲            │              │         ▲            │ │
 │  │         │ Socket I/O │              │         │ Socket I/O │ │
 │  │         ▼            │              │         ▼            │ │
-│  │  ┌────────────────┐  │              │  ┌────────────────┐ │ │
-│  │  │ Crypto Layer   │  │              │  │ Crypto Layer   │ │ │
-│  │  │ (AES, RSA, DH) │  │              │  │ (AES, RSA, DH) │ │ │
-│  │  └────────────────┘  │              │  └────────────────┘ │ │
+│  │  ┌────────────────┐  │              │  ┌────────────────┐  │ │
+│  │  │ Crypto Layer   │  │              │  │ Crypto Layer   │  │ │
+│  │  │ (AES, RSA, DH) │  │              │  │ (AES, RSA, DH) │  │ │
+│  │  └────────────────┘  │              │  └────────────────┘  │ │
 │  │                      │              │                      │ │
-│  │ Certs:              │              │ Certs:              │ │
-│  │ • client_cert.pem   │              │ • server_cert.pem   │ │
-│  │ • client_key.pem    │              │ • server_key.pem    │ │
-│  │ • ca_cert.pem       │              │ • ca_cert.pem       │ │
+│  │ Certs:               │              │ Certs:               │ │
+│  │ • client_cert.pem    │              │ • server_cert.pem    │ │
+│  │ • client_key.pem     │              │ • server_key.pem     │ │
+│  │ • ca_cert.pem        │              │ • ca_cert.pem        │ │
 │  └──────────────────────┘              └──────────────────────┘ │
-│                                                                   │
-│  Protocol Layer: Application-Level Encryption                    │
-│  • Message Format: [4-byte length prefix] + [JSON message]       │
-│  • Encryption: AES-128-CBC with RSA-PSS-SHA256 signatures        │
+│                                                                 │
+│  Protocol Layer: Application-Level Encryption                   │
+│  • Message Format: [4-byte length prefix] + [JSON message]      │
+│  • Encryption: AES-128-CBC with RSA-PSS-SHA256 signatures       │
 │  • Key Exchange: Diffie-Hellman (RFC 3526 Group 14, 2048-bit)   │
-│                                                                   │
+│                                                                 │
 └────────────────┬────────────────────────────────────────────────┘
                  │
                  │ JDBC/MySQL Network
                  │ (Salted SHA-256 passwords)
                  │
          ┌───────▼────────┐
-         │  MYSQL DATABASE │
-         │                 │
+         │ MYSQL DATABASE │
+         │                │
          │ Tables:        │
          │ • users        │
          │ • sessions     │
          │ • transcripts  │
-         └─────────────────┘
+         └────────────────┘
 
 Security Properties:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -120,42 +120,42 @@ Security Properties:
 ### Message Protocol Flow
 
 ```
-Client                                                        Server
-  │                                                              │
+Client                                                       Server
+  │                                                             │
   ├─────────────── HELLO (w/ client cert) ───────────────────►  │
-  │                                                              │
+  │                                                             │
   │  ◄────────── SERVER_HELLO (w/ server cert) ───────────────  │
-  │                                                              │
-  ├─────────────── DH_CLIENT (public key A) ───────────────────►  │
-  │                                                              │
-  │  ◄────────── DH_SERVER (public key B, all signed) ──────────  │
-  │                                                              │
-  │  [Derive shared secret: Ks = g^(ab) mod P]                 │
-  │  [Derive session key: K = SHA256(Ks)[:16]]                 │
-  │                                                              │
+  │                                                             │
+  ├─────────────── DH_CLIENT (public key A) ─────────────────►  │
+  │                                                             │
+  │  ◄────────── DH_SERVER (public key B, all signed) ────────  │
+  │                                                             │
+  │  [Derive shared secret: Ks = g^(ab) mod P]                  │
+  │  [Derive session key: K = SHA256(Ks)[:16]]                  │
+  │                                                             │
   ├─────────────── REGISTER/LOGIN (auth message) ────────────►  │
-  │                                                              │
-  │  ◄────────────────── AUTH_OK/REJECT ─────────────────────  │
-  │                                                              │
-  ├─────────────── MSG (encrypted + signed) ──────────────────►  │
-  │  MSG = {                                                     │
+  │                                                             │
+  │  ◄────────────────── AUTH_OK/REJECT ──────────────────────  │
+  │                                                             │
+  ├─────────────── MSG (encrypted + signed) ─────────────────►  │
+  │  MSG = {                                                    │
   │    seqno: int,                                              │
   │    ts: int,                  ← Timestamp (ms since epoch)   │
   │    ct: base64(AES(plaintext)), ← Ciphertext                 │
   │    sig: base64(RSA-PSS(H))  ← Signature over message digest │
-  │  }                                                           │
-  │                                                              │
+  │  }                                                          │
+  │                                                             │
   │  ◄──────────────── RECEIPT (non-repudiation) ─────────────  │
-  │                                                              │
+  │                                                             │
   ├─────────────── MSG (another message) ────────────────────►  │
-  │  [Seq# = 2 (increments per message)]                       │
-  │                                                              │
-  │  ◄──────────────── RECEIPT ──────────────────────────────  │
-  │                                                              │
-  ├─────────────── LOGOUT ────────────────────────────────────►  │
-  │                                                              │
+  │  [Seq# = 2 (increments per message)]                        │
+  │                                                             │
+  │  ◄──────────────── RECEIPT ───────────────────────────────  │
+  │                                                             │
+  ├─────────────── LOGOUT ───────────────────────────────────►  │
+  │                                                             │
   │  ◄────────────── SESSION_END (final transcript hash) ─────  │
-  │                                                              │
+  │                                                             │
 ```
 
 ---
