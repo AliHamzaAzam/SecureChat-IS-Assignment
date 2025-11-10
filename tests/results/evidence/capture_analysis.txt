@@ -1,0 +1,190 @@
+SECURECHAT PCAP ANALYSIS REPORT
+======================================================================
+Timestamp: 2025-11-10T07:07:30.012935
+PCAP File: /Users/azaleas/Developer/Github/SecureChat-IS-Assignment/tests/evidence/secure_chat.pcapng
+File Size: 64244 bytes
+
+PROTOCOL MESSAGE SUMMARY
+----------------------------------------------------------------------
+  DH_CLIENT: 2 packet(s)
+  DH_SERVER: 2 packet(s)
+  HELLO: 1 packet(s)
+  LOGIN_ENCRYPTED: 1 packet(s)
+  MSG: 3 packet(s)
+  SERVER_HELLO: 1 packet(s)
+  login_response: 1 packet(s)
+  receipt: 2 packet(s)
+
+PACKET DETAILS
+----------------------------------------------------------------------
+
+Packet 5 (Frame 5):
+  Direction: client→server
+  Type: HELLO
+  Encrypted: No
+  Signed: No
+    {
+        "type": "HELLO",
+        "nonce": "f4TdZipIYkgOtfmh/1sYaA==",
+        "client_cert": "-----BEGIN CERTIFICATE-----\nMIIDPDCCAiSgAwIBAgIUXS9dhKGVQCRPUVS0aFelb3mDPSAwDQYJKoZIhvcNAQEL\nBQAwPDELMAkGA1UEBhMCUEsxEzARBgNVBAoMCkZBU1QtTlVDRVMxGDAWBgNVBAMM\nD0ZBU1QtTlUgUm9vdCBDQTAeFw0yNTExMDgxNzQ3MzJaFw0yNjExMDgxNzQ3MzJa\nMDkxCzAJBgNVBAYTAlBLMRMwEQYDVQQKDApGQVNULU5VQ0VTMRUwEwYDVQQDDAxj\nbGllbnQubG9jYWwwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC9+k1C\nDgrK49IRaGmPe1VVf99SyUbVjFuvPyruk6URCqBbpYbrLo3UjXhYa8wDas+cl+ai\n3UP1AXrZ5EjAf67dpY6hBVN7/E2DE1ceeer7yn9noO5D+v4uMXG79/z40q0XMoT9\nBlJWJ56XuxbdjqaJnzIjVAhuuMi77+IDbNguZlmuOP4TVsYhnE/gTHrGBIR40riK\nIDkjfIz/Vc4N7HQgZNrg1TtkY5y2q4Lw49yMN0ER73QVRd2FWDjrau3BwK1mmzos\n2PikBPeUdgto5tS0MU/cZDRT57ppEB/ZPv4Q39K2vAVqBgcDQbcWuh8US+HjfZZo\nipCn0Pf3tpcZxCULAgMBAAGjOTA3MAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQD\nAgWgMBcGA1UdEQQQMA6CDGNsaWVudC5sb2NhbDANBgkqhkiG9w0BAQsFAAOCAQEA\nYcU/VcecvxD2LU7luQtmTbt1eXYFHDkFw4WB+CT8Czu11LCPkikD8nqSbGtYApxK\nN0blw9As5YDB960vx0KF+D+lZmpdoc3R65K+4Oug1wVU7rQggminSVTEymF/3cCg\nluuWUBZ5pF4+cZp8k/mOpK60L4v3nS7pY4p8D0EhwLdlBdgGJxt/9qkX2YQ6jphi\nP++qBfSyyb4VQceOmodQRUSD8Z56sxVhO1D6KdR6X2p4qrJM0lOSnMigv+mEyYM8\nNteB/AOcNWvmk6oni7Khr5mtE+HAicRcRxVmHCqHTlayVtPsRzbSxuUF+nSo4T1N\n1gxgblcx+9tupwxaofcAoA==\n-----END CERTIFICATE-----\n"
+    }
+
+Packet 7 (Frame 7):
+  Direction: server→client
+  Type: SERVER_HELLO
+  Encrypted: No
+  Signed: No
+    {
+        "type": "SERVER_HELLO",
+        "nonce": "sspYR6xIRqFHvJI239q+6A==",
+        "server_cert": "-----BEGIN CERTIFICATE-----\nMIIDPDCCAiSgAwIBAgIUD+/nVWg4iTSkbsTFTZeZSAAH5egwDQYJKoZIhvcNAQEL\nBQAwPDELMAkGA1UEBhMCUEsxEzARBgNVBAoMCkZBU1QtTlVDRVMxGDAWBgNVBAMM\nD0ZBU1QtTlUgUm9vdCBDQTAeFw0yNTExMDgxNzQ3MTRaFw0yNjExMDgxNzQ3MTRa\nMDkxCzAJBgNVBAYTAlBLMRMwEQYDVQQKDApGQVNULU5VQ0VTMRUwEwYDVQQDDAxz\nZXJ2ZXIubG9jYWwwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDVc8Kr\nTwmGd6hkaJtSJzqQ7OP0AsuJ6WJvIpReKNt/pS1+dXRPHjz/F3HBBfcaSsRmQUT5\nY05HJ6rNqioihpnkY54xTz0E8kUP3k5sx2bV6WgycvimSkbQPOJ0F28xSFDXKDuW\n0iE29VnmXaA19eJ04FCoV9OW1JvVYC4si1RUQ80/zi8T4Oht3HB9W/QQknEHIH1W\neSgZb5yiyrlHGjhD+3WWI9wvyHmYvwPsFkuXQC/KNvPPRozr0hVxyHpmqMfMYT6U\nHqOsO2Nbxjts9WknK64CVVSwkg/koLmYNm4t51kJorrFS9jYqkP9byts5Ak/pvQb\nva/a6tBOJMq2ptp3AgMBAAGjOTA3MAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQD\nAgWgMBcGA1UdEQQQMA6CDHNlcnZlci5sb2NhbDANBgkqhkiG9w0BAQsFAAOCAQEA\nGH3IVFjiRJKQodtYFB6t9zLDsUaczUr3evdpWRr1LnjQga5gG3L3kxmE/2Tm9W3p\nMHecz4wZXSR1HzEpDT75HZPTP0pnP21+KqSCf+67g08bMGj4Q4aP+DhzaOy2uxOL\nZZqSt1Gex9XOxXZrLNm5kDATdzv80TB9i3DnTryhpi6pas1huiRfHRwurEDyOtgh\nwW1PBr7uAUG8Af+0wzailGZrfNEC8EpJaNgy8YAbT+di5cAup/AkK48WyZo0C90J\n5Gzpc9XgT48F90V9XN9QoRu90OI2G2FJOo6J4s/6IsmUWTd6QXynd9d0tjUua9UA\nF1yxWIWceBmnvtpO4dMmdw==\n-----END CERTIFICATE-----\n"
+    }
+
+Packet 9 (Frame 9):
+  Direction: client→server
+  Type: DH_CLIENT
+  Encrypted: No
+  Signed: No
+    {
+        "type": "DH_CLIENT",
+        "g": 2,
+        "p": "0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529070796966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aacaa68ffffffffffffffff",
+        "A": "0x853a5d1c5b7baee8d424b2a10e2dd98f8006e5985eab3033c60cc3b33049f035c775d799e89bac1aee9f4248b7782c2d6691db1c1339343ed44bb55895aa5d4f6ed62ce68e941b2077bd38a68091f2b8a41bf6bccb808e3329c57a261279c28ab5e24ed2c72785f2b46f2c4d8d5ed84c613be14866b175f7350304292999f0e511ba9d7f2e4264d807b298867cd33cab0948fae01025b72881e0b73f91a422857fd2dcbc0df28ec0c12a49806f561db9eefc33ced6e3354faaf893a1fc16ce1bdb7253d83538c9687a0e021c20fdfc66d54057190ab64367e54457dd42d77254ad14ced4d91596bc12f79c4ae7bdf043e22ab4451d5d07b45799062ddc0c7ad9"
+    }
+
+Packet 11 (Frame 11):
+  Direction: server→client
+  Type: DH_SERVER
+  Encrypted: No
+  Signed: No
+    {
+        "type": "DH_SERVER",
+        "B": "0x8d47561a19d621454bf6867ca7127c5b7429ad5298fe29392d24a3c64e6a1bd248b305198443eda6aa4727507824860e7a035a1eaa610999abaa857985da7121390cefea42a7c086f4255d26188ce04ed0443e0d101863154606c3d185981c88dfec53424bd000d61042f113702e2e88031055428675eafe4557ace0f12e7dc898d6a767a2462bd6fb1191d894f28e1c566c8ca8a646ff417553903d9ce1e4d8f85c2114f0c75da55aa59180843192985a382d66c20a8cd28d47019b4cfd0d1c5e01c594c7cdf355846ce65ee4f5c4268126446a23ba7eb8e33e999c1e9cdcc95b74c7217920b15f8669bc711acb51b21c9267cf53edaaf8ff694e65c4a850a1"
+    }
+
+Packet 15 (Frame 15):
+  Direction: client→server
+  Type: LOGIN_ENCRYPTED
+  Encrypted: No
+  Signed: No
+    {
+        "type": "LOGIN_ENCRYPTED",
+        "ciphertext": "6bGqQP+922m6Dsh0QDs58ZfUGyfT3HDg65Q+zW0aDYc++p4KvBpJA2/xDbNXHQVF5wzwtdTAxz5R1TxgDHw/HIZv6GaXuojt6n9LxvVMGqc="
+    }
+
+Packet 219 (Frame 219):
+  Direction: server→client
+  Type: login_response
+  Encrypted: No
+  Signed: No
+    {
+        "type": "login_response",
+        "success": true,
+        "username": "testuser",
+        "message": "Login successful: testuser"
+    }
+
+Packet 221 (Frame 221):
+  Direction: client→server
+  Type: DH_CLIENT
+  Encrypted: No
+  Signed: No
+    {
+        "type": "DH_CLIENT",
+        "dh_public": "0x2e039563e5cc551f0382fc158f7a3399cfd7dbe6e06b14548beeb46aa388195b2d22ccb927d6b8ddd4ef3cb34aaa49e7e806a49fbc6e9cc0cfe9fa57ce9055a556a94de2e2585fde5ec952a19092f77ebdb64f9ffb049c6bc6c51eb12ae458883f0bcc9e296bf8804062017c643ba5c998b8ae9abae3e7cc76378554febd4d87b3a5ee158459d1bb6c0299752f8355e6308c8b63247db22d1b3cc3633984eced231d000cd6dcbd9ae2c6d68fff5f997352380400b517f06d5e039aeebfd7d09b613d186154e7149930256e4dc9301e0dac9b167726c30648488aa5f61062e21e61e8143c1b6692de1ad9411b819fc7a6dae84cf7b3eaf067a54700a8757f4848"
+    }
+
+Packet 223 (Frame 223):
+  Direction: server→client
+  Type: DH_SERVER
+  Encrypted: No
+  Signed: No
+    {
+        "type": "DH_SERVER",
+        "dh_public": "0x630c8f726f2d39267962545c34ce33c08c6474a561e55a4724b73758af1ba3d85ea9ef2572313f2292fbe64c350e5d6e31634bf7411664386a3815d0502c16860aaeb9c04747c17a79c5517aa5f536b12613536d5ae8d7af235b6c52b212064ba180e6a836655763c7822e00f4e624832c9bcb9befba9df5a2a298bc71bca1cf37778e36aa5e88b6478337fc033c8cce3bcd90bb58641ae78c601215b1efd7ebede68c6054ae73e1ce233a8fe0e00bbedd069553655660c2101d1a5faee1698f5ee1f06efffb8b4fd1bd12181d88b752f98dcd1a1eb7736f790b686831c16636602917de34014db61303849091fb8978d4199fcbcdffa2d20d5bb6a0a881c31d"
+    }
+
+Packet 235 (Frame 235):
+  Direction: client→server
+  Type: MSG
+  Encrypted: Yes
+  Signed: Yes
+    {
+        "type": "MSG",
+        "seqno": 1,
+        "ts": 1762720620924,
+        "ct": "4Y3PnK7S/2Wa3OVQtuk3PT0rUXBskgUg7QW38yYT6wwUDO639bc6q1gt2JXZ5VZD",
+        "sig": "gPdG0mU2BF1FMP7o3Pvyf02A2A+eLGrZ++lAamSHnl6ak51FOg0m4KReFmRjhf2Uziwj4f6Ro1UgWgceW41HlE1cBlQAMm877aJZ6hauGjHhNGz//cuepcfD/o6sVIj8toQAu9W7kGshk3M/SN1dTwkBKrd/xYuyK7J2zlsKDWSPKU/DS0BpwGxI1Jx/16JCUXI1ZrPU6IsbSsUQ1cUHdEuYskynlBDp06xo0zC1/AgWZ3JCcAiTfUCFmv09HQkdYFt/8ONrlCRyb+8MQgcvH7NAWULwTfFmJrqzLoPVEfBAMBKCEutr5r3AlaVHCkGUKsZeVl9acOnN+I+vYLxZHQ=="
+    }
+
+Packet 247 (Frame 247):
+  Direction: server→client
+  Type: MSG
+  Encrypted: Yes
+  Signed: Yes
+    {
+        "type": "MSG",
+        "seqno": 1,
+        "ts": 1762720627061,
+        "ct": "fsn7i4Vz3pprNNdYPwn9FxR+2zPK/Lx3eGXQp7rqPqA=",
+        "sig": "TkAoqxBszuyQTDyYTG2nsAeuJMih4VFpeDIf6xeTLLxkpgaclH4CobpTJTvpq3Gg6mhQJLQuuBWyRDC+6k8Hn79A8c1aRmVSUrQU2f/cYB8vwa0lTObSSh+VvU4QNzGItmvWFlKNX2TszywFjjCPEc8PWEc2Bz+YFV8DPRc5XNwu0I4DVg/egRtGHE4Os633wO7qpZRQZGY5NaviLwZ2iEpGS48PCfyfDOzeof2L6TBQZKIqxLU1TIohhdsewUAKVDk3FSFT/CP6Q7LeJe78xRWgtg77IFHAcPfmRj11YvoZC5Z48tH1p77CRlIOeWKd+1v0lTFsU5enOkeax5rhYA=="
+    }
+
+Packet 261 (Frame 261):
+  Direction: client→server
+  Type: MSG
+  Encrypted: Yes
+  Signed: Yes
+    {
+        "type": "MSG",
+        "seqno": 2,
+        "ts": 1762720639207,
+        "ct": "+JHl/Z+ThlkpO/hEmgKJ1kobB/KOYyqJV2Y6EF5n8AIAQUD29RskWpYMV38qeEuB",
+        "sig": "N3Aspmo79o8xnxj2xbRsQPT4SZuzI4mmHMa47zth16trib4YLRtRdxVem2g8b3fkTlPjd8KwtN8oTdbeUpRt2pnCn8CWezSAPo7Fsu1VN1KlSFre5WvCVleAu8YqzU1HqQSrf1BKtvibe6eudhqKnEUSX/3JkpU0VSzuj76Vx8AHitpWvQ9YWSItilv9wpJ/p40IZhk8fbQkmZA32KsCEJfFkPjiQh8mT588NG2SBIJ0KuXDq+DIEzju2TLdXyAW1QIIwnYG/otOCkuvKHpaH+pvdVAojsJc8rAqb00m8TX/SuFaKjw+CgwttxeMyoI3mHJYIvyRpgf5wPXjNNVpYg=="
+    }
+
+Packet 263 (Frame 263):
+  Direction: client→server
+  Type: receipt
+  Encrypted: Yes
+  Signed: Yes
+    {
+        "type": "receipt",
+        "data": {
+            "type": "receipt",
+            "peer": "client",
+            "username": "testuser",
+            "first_seq": 1,
+            "last_seq": 2,
+            "transcript_sha256": "0d399875d1bc2aab2252b33a9387176a96f05e8d75e54560b4604d48909d3a58",
+            "sig": "gfCgKdJGtiEwGgm+N9hzs3SpeEOGKG5d74VnL+cuf35KqNv1ICWDZ1fHJtptfZsQidYrc21VdOvbwtjbD7pinOR4Four0CjCSLCr5v07rGTuGRZs7ylCJwi3uLQFXzYAATsWZG9XtVnMek0WSZ8Ed32eLm1R+g0G2/DLq9zCgji/CHyuSwzMZOtC3agxmAbcCT9bIAGsJL9VG8KvOZT8bJnSiW28xESlJqy2N+Az5Jd4Mo5sIlnOgE0DQe29BQAzfRSYIwHfUiyBdI7sNUGvedwyhb/pvO843d83JY91yGjeF6Lb8ADC0UZ2wvtsoeYTMCH9qydaiiUiHqnQ3M7rOQ=="
+        }
+    }
+
+Packet 265 (Frame 265):
+  Direction: server→client
+  Type: receipt
+  Encrypted: Yes
+  Signed: Yes
+    {
+        "type": "receipt",
+        "data": {
+            "type": "receipt",
+            "peer": "server",
+            "username": "testuser",
+            "first_seq": 1,
+            "last_seq": 2,
+            "transcript_sha256": "9bfc6cfb1539f9753b81e28228ac9eb67b1f2f7ecb90633f2c8f1c4f5516af19",
+            "sig": "CZajhXoixKpIExmsiFAODbUiB6Q+shz7Z8uTW3DmpOo3+xlp8XLRZgJOC4tuRJ+ZJkntlRYEWdGtsWX02AehGgfaw0E7UCW1hDNB+qHEMkJm+rHR/up6D+tT5EN0Y/P4FHwVPDzH3SdD5b/MO0TuTo9p36jcBdTccVZJQGwDBdnNGpKr4sj8HusOSAaO5vWKn0upfeAQZ+igS6/cjtOFaIQCxj6KypaidPPe+iSZ/ga+Jr3sIsVhJhjGkqTCPLdiGyj56+wf1wuvcEiCBSEw67NrD44uxT1fIj8TEIPt7i0Zn8KiLI8b9kNHbSaULtsNPgGYxEiuNBdQD/SpsO5rAg=="
+        }
+    }
+
+======================================================================
+SECURITY FINDINGS
+======================================================================
+✅ All 3 MSG packets are encrypted (confidentiality verified)
+✅ All 3 MSG packets are signed (integrity verified)
+✅ DH key exchange detected (4 packets)
+✅ Certificate exchange completed (HELLO/SERVER_HELLO)
+
+Total packets captured: 13

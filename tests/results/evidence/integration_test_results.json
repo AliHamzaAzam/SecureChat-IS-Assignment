@@ -1,0 +1,63 @@
+{
+  "passed": 9,
+  "failed": 0,
+  "tests": [
+    {
+      "name": "Replay Attack",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:28:56.511822",
+      "end_time": "2025-11-09T21:29:01.537529"
+    },
+    {
+      "name": "Tampering - Ciphertext",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:29:03.542562",
+      "end_time": "2025-11-09T21:29:09.562283"
+    },
+    {
+      "name": "Tampering - Timestamp",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:29:11.562519",
+      "end_time": "2025-11-09T21:29:17.586066"
+    },
+    {
+      "name": "Tampering - Seqno",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:29:19.591145",
+      "end_time": "2025-11-09T21:29:25.611492"
+    },
+    {
+      "name": "Out-of-Order Messages",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:29:27.615357",
+      "end_time": "2025-11-09T21:29:32.144851"
+    },
+    {
+      "name": "Certificate - Validity",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:29:34.149179",
+      "end_time": "2025-11-09T21:29:38.228139"
+    },
+    {
+      "name": "Certificate - Chain Validation",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:29:40.233199",
+      "end_time": "2025-11-09T21:29:43.252772"
+    },
+    {
+      "name": "Certificate - CN Matching",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:29:45.257883",
+      "end_time": "2025-11-09T21:29:48.274036"
+    },
+    {
+      "name": "Certificate - Signature Verification",
+      "status": "PASS",
+      "start_time": "2025-11-09T21:29:50.279119",
+      "end_time": "2025-11-09T21:29:53.317898"
+    }
+  ],
+  "start_time": "2025-11-09T21:28:56.511789",
+  "end_time": "2025-11-09T21:29:53.317916",
+  "duration_seconds": 56.806127
+}

@@ -1,0 +1,9 @@
+{
+  "timestamp": "2025-11-10T01:33:47.135038",
+  "pcap_file": "/Users/azaleas/Developer/Github/SecureChat-IS-Assignment/tests/evidence/secure_chat.pcapng",
+  "pcap_exists": false,
+  "pcap_size_bytes": 0,
+  "capture_port": 9999,
+  "evidence_directory": "/Users/azaleas/Developer/Github/SecureChat-IS-Assignment/tests/evidence",
+  "packet_analysis": {}
+}

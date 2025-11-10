@@ -1,0 +1,23 @@
+{
+  "timestamp": "2025-11-10T07:07:30.101223",
+  "pcap_file": "/Users/azaleas/Developer/Github/SecureChat-IS-Assignment/tests/evidence/secure_chat.pcapng",
+  "analysis_files": {
+    "json": "/Users/azaleas/Developer/Github/SecureChat-IS-Assignment/tests/evidence/capture_analysis.json",
+    "text": "/Users/azaleas/Developer/Github/SecureChat-IS-Assignment/tests/evidence/capture_analysis.txt",
+    "manifest": "/Users/azaleas/Developer/Github/SecureChat-IS-Assignment/tests/evidence/capture_analysis_manifest.json"
+  },
+  "summary": {
+    "total_packets": 13,
+    "protocol_types": {
+      "HELLO": 1,
+      "SERVER_HELLO": 1,
+      "DH_CLIENT": 2,
+      "DH_SERVER": 2,
+      "LOGIN_ENCRYPTED": 1,
+      "login_response": 1,
+      "MSG": 3,
+      "receipt": 2
+    },
+    "errors": []
+  }
+}
