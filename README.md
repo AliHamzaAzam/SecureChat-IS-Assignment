@@ -33,7 +33,7 @@ Ensure you have the following installed on your system:
 | Component | Version | Purpose |
 |-----------|---------|---------|
 | Python | 3.8+ | Runtime environment |
-| MySQL | 8.0+ | User database and session storage |
+| MySQL | 8.0+ | User database storage |
 | OpenSSL | 1.1.1+ | Certificate generation and validation |
 | pip | Latest | Python package management |
 | Git | Latest | Version control |
@@ -71,7 +71,7 @@ docker --version           # Verify Docker is installed
 │  │   CLIENT MACHINE     │              │   SERVER MACHINE     │ │
 │  │                      │              │                      │ │
 │  │  ┌────────────────┐  │ TCP Port     │  ┌────────────────┐  │ │
-│  │  │ User Interface │  │ 5000 (TCP)   │  │ Session Manager│  │ │
+│  │  │ User Interface │  │ 9999 (TCP)   │  │ Session Manager│  │ │
 │  │  │                │  │◄────────────►│  │                │  │ │
 │  │  └────────────────┘  │              │  └────────────────┘  │ │
 │  │         ▲            │              │         ▲            │ │
@@ -103,8 +103,6 @@ docker --version           # Verify Docker is installed
          │                │
          │ Tables:        │
          │ • users        │
-         │ • sessions     │
-         │ • transcripts  │
          └────────────────┘
 
 Security Properties:
@@ -249,13 +247,13 @@ nano .env  # or vim, or your preferred editor
 **`.env` Template:**
 ```ini
 # MySQL Database Configuration
-MYSQL_HOST=127.0.0.1
+MYSQL_HOST=localhost
 MYSQL_USER=scuser
 MYSQL_PASSWORD=scpass
 MYSQL_DATABASE=securechat
 
 # Server Configuration
-SERVER_HOST=127.0.0.1
+SERVER_HOST=localhost
 SERVER_PORT=9999
 
 # Logging
@@ -283,10 +281,10 @@ python -m app.storage.db --init
 python scripts/gen_ca.py --name "SecureChat Root CA"
 
 # Generate Server Certificate (signed by CA)
-python scripts/gen_cert.py --cn server.local --out certs/server
+python scripts/gen_cert.py --name "Server Certificate" --cn server.local --out certs/server
 
 # Generate Client Certificate (signed by CA)
-python scripts/gen_cert.py --cn client.local --out certs/client
+python scripts/gen_cert.py --name "Client Certificate" --cn client.local --out certs/client
 ```
 
 **Expected Output:**
@@ -558,7 +556,7 @@ SecureChat>
 
 **Server logs:**
 ```
-[14:40:00] INFO - Client connected from 127.0.0.1:54333
+[14:40:00] INFO - Client connected from localhost:54333
 [14:40:00] ERROR - Certificate validation failed: Signature invalid
 [14:40:00] INFO - Connection terminated: BAD_CERT
 ```
@@ -725,7 +723,7 @@ Replay Attack Attempt:
 
 **Run Test:**
 ```bash
-python tests/test_invalid_cert.py
+python -m tests.unit_tests.test_invalid_cert
 ```
 
 **Expected Output:**
@@ -768,7 +766,7 @@ Summary: 5/5 PASS ✓
 
 **Run Test:**
 ```bash
-python tests/test_replay.py
+python -m tests.unit_tests.test_replay
 ```
 
 **Expected Output:**
@@ -813,7 +811,7 @@ Summary: 4/4 PASS ✓
 
 **Run Test:**
 ```bash
-python tests/test_tampering.py
+python -m tests.unit_tests.test_tampering
 ```
 
 **Expected Output:**
@@ -868,12 +866,12 @@ python tests/wireshark_capture.py --mode full
 
 Mode: full (automated server + client + capture)
 
-[1/4] Starting tcpdump capture on lo:5000...
+[1/4] Starting tcpdump capture on lo:9999...
       PID: 12345
       Output: tests/evidence/secure_chat.pcap
 
 [2/4] Starting SecureChat server...
-      Server running on 127.0.0.1:5000
+      Server running on localhost:9999
       PID: 12346
 
 [3/4] Starting SecureChat client...
@@ -1039,7 +1037,7 @@ tcp.port == 9999 && frame contains "DH"
 
 **Error Message:**
 ```
-ERROR: MySQL server is not running on 127.0.0.1:3306
+ERROR: MySQL server is not running on localhost:3306
 ```
 
 **Solution:**
@@ -1066,8 +1064,8 @@ FileNotFoundError: [Errno 2] No such file or directory: 'certs/server_cert.pem'
 ```bash
 # Regenerate certificates
 python scripts/gen_ca.py --name "SecureChat Root CA"
-python scripts/gen_cert.py --cn server.local --out certs/server
-python scripts/gen_cert.py --cn client.local --out certs/client
+python scripts/gen_cert.py --name "Server Certificate" --cn server.local --out certs/server
+python scripts/gen_cert.py --name "Client Certificate" --cn client.local --out certs/client
 
 # Verify
 ls -la certs/
@@ -1083,12 +1081,12 @@ OSError: [Errno 48] Address already in use
 **Solution:**
 ```bash
 # Find process using port 9999
-lsof -i :9999              # macOS/Linux
+lsof -i :9999                 # macOS/Linux
 netstat -ano | findstr :9999  # Windows
 
 # Kill process
-kill -9 <PID>              # macOS/Linux
-taskkill /PID <PID> /F     # Windows
+kill -9 <PID>                 # macOS/Linux
+taskkill /PID <PID> /F        # Windows
 
 # Or change port in .env
 SERVER_PORT=9998
@@ -1168,8 +1166,8 @@ ERROR: Signature verification failed (SIG_FAIL)
 # Regenerate all certificates
 rm certs/*.pem
 python scripts/gen_ca.py --name "SecureChat Root CA"
-python scripts/gen_cert.py --cn server.local --out certs/server
-python scripts/gen_cert.py --cn client.local --out certs/client
+python scripts/gen_cert.py --name "Server Certificate" --cn server.local --out certs/server
+python scripts/gen_cert.py --name "Client Certificate" --cn client.local --out certs/client
 
 # Restart server and client
 ```
@@ -1184,10 +1182,15 @@ python scripts/gen_cert.py --cn client.local --out certs/client
 SecureChat-IS-Assignment/
 │
 ├── README.md (this file)
+├── LICENSE
 ├── requirements.txt
 ├── .env.example
-├── .env (do not commit)
+├── .env (do not commit - local config)
 ├── .gitignore
+├── VERIFY_SESSION.md
+│
+├── .github/
+│   └── copilot-instructions.md
 │
 ├── app/
 │   ├── __init__.py
@@ -1206,18 +1209,17 @@ SecureChat-IS-Assignment/
 │   ├── crypto/
 │   │   ├── __init__.py
 │   │   ├── aes_crypto.py            # AES-128-CBC encryption/decryption
-│   │   ├── dh_exchange.py           # DH key exchange (RFC 3526 Group 14)
-│   │   ├── rsa_signer.py            # RSA-PSS signing/verification
-│   │   ├── cert_validator.py        # X.509 certificate validation
 │   │   ├── aes.py                   # (Alternative AES implementation)
+│   │   ├── dh_exchange.py           # DH key exchange (RFC 3526 Group 14)
 │   │   ├── dh.py                    # (Alternative DH implementation)
-│   │   ├── pki.py                   # (Alternative PKI implementation)
-│   │   └── sign.py                  # (Alternative signing implementation)
+│   │   ├── rsa_signer.py            # RSA-PSS signing/verification
+│   │   ├── sign.py                  # (Alternative signing implementation)
+│   │   ├── cert_validator.py        # X.509 certificate validation
+│   │   └── pki.py                   # (Alternative PKI implementation)
 │   │
 │   ├── common/
 │   │   ├── __init__.py
-│   │   ├── protocol.py              # Message dataclasses (Pydantic)
-│   │   └── utils.py                 # Helper functions
+│   │   └── protocol.py              # Message dataclasses (Pydantic)
 │   │
 │   └── storage/
 │       ├── __init__.py
@@ -1230,7 +1232,52 @@ SecureChat-IS-Assignment/
 │   ├── gen_cert.py                  # Generate client/server certificates
 │   └── verify_session.py            # Offline session verification tool
 │
-├── certs/
+├── tests/
+│   ├── __init__.py
+│   ├── TESTING.md                   # Test suite overview
+│   │
+│   ├── unit_tests/
+│   │   ├── __init__.py
+│   │   ├── test_invalid_cert.py     # Certificate validation tests
+│   │   ├── test_replay.py           # Replay protection tests
+│   │   └── test_tampering.py        # Tampering detection tests
+│   │
+│   ├── integration_tests/
+│   │   ├── __init__.py
+│   │   ├── test_certificate_exchange.py      # Cert exchange integration test
+│   │   ├── test_e2e_2user_chat.py            # End-to-end 2-user chat test
+│   │   ├── test_integration_live.py          # Live integration tests
+│   │   └── mitm_proxy.py                     # MITM proxy for testing
+│   │
+│   ├── network_analysis/
+│   │   ├── __init__.py
+│   │   └── wireshark_capture.py     # Automated Wireshark capture & analysis
+│   │
+│   ├── manual/
+│   │   ├── __init__.py
+│   │   └── NOTES.md                 # Manual testing checklist
+│   │
+│   └── results/
+│       ├── cert_validation_results.json
+│       ├── replay_test_results.json
+│       ├── tampering_test_results.json
+│       └── evidence/                # Test evidence & artifacts
+│           ├── capture_analysis.json
+│           ├── capture_analysis.txt
+│           ├── capture_manifest.json
+│           ├── integration_test_results.json
+│           ├── secure_chat.pcapng   # Wireshark PCAP capture
+│           ├── tampering_evidence.json
+│           ├── tampering_evidence.txt
+│           └── wireshark_screenshot.png
+│
+├── sql/
+│   ├── schema.sql                   # MySQL database schema documentation
+│   ├── db_dump.sql                  # Database backup/restore script
+│   └── sample_data.sql              # Sample test data for users table
+│
+├── certs/ (✘ NOT tracked - generated locally)
+│   ├── .keep
 │   ├── ca_cert.pem                  # Root CA certificate (public)
 │   ├── ca_key.pem                   # Root CA private key (secret)
 │   ├── server_cert.pem              # Server certificate
@@ -1238,46 +1285,13 @@ SecureChat-IS-Assignment/
 │   ├── client_cert.pem              # Client certificate
 │   └── client_key.pem               # Client private key
 │
-├── tests/
-│   ├── __init__.py
-│   ├── README.md                    # Test suite overview
-│   ├── test_invalid_cert.py         # Unit test: certificate validation
-│   ├── test_replay.py               # Unit test: replay protection
-│   ├── test_tampering.py            # Unit test: tampering detection
-│   │
-│   ├── CERTIFICATE_TESTS.md         # Certificate test documentation
-│   ├── REPLAY_PROTECTION_README.md  # Replay test documentation
-│   ├── TAMPERING_INTEGRITY_README.md # Tampering test documentation
-│   ├── WIRESHARK_ANALYSIS.md        # Wireshark guide (detailed)
-│   ├── WIRESHARK_QUICK_START.md     # Wireshark guide (quick)
-│   ├── wireshark_capture.py         # Automated Wireshark capture tool
-│   │
-│   ├── evidence/
-│   │   ├── tampering_evidence.txt
-│   │   ├── tampering_evidence.json
-│   │   ├── secure_chat.pcap         # (Generated during Wireshark test)
-│   │   └── wireshark_report.json    # (Generated during Wireshark test)
-│   │
-│   ├── invalid_certs/               # Test certificates (invalid)
-│   │   ├── expired_cert.pem
-│   │   ├── expired_key.pem
-│   │   ├── self_signed_cert.pem
-│   │   ├── self_signed_key.pem
-│   │   ├── wrong_cn_cert.pem
-│   │   ├── wrong_cn_key.pem
-│   │   ├── not_yet_valid_cert.pem
-│   │   └── not_yet_valid_key.pem
-│   │
-│   └── manual/
-│       ├── __init__.py
-│       └── NOTES.md                 # Manual testing checklist
-│
-├── transcripts/
-│   └── alice_session_1731141000.log # (Generated during session)
-│
-└── sql/
-    └── schema.sql                   # MySQL database schema
+└── transcripts/ (✘ NOT tracked - generated during sessions)
+    └── [session files generated during runtime]
 ```
+
+**Legend:**
+- ✓ = Tracked in git
+- ✘ = NOT tracked (ignored by .gitignore)
 
 ### Key Files Explained
 
@@ -1396,4 +1410,12 @@ All security properties are **testable, verifiable, and documented** with:
 - Session verification scripts
 - Comprehensive troubleshooting guide
 
-For questions or issues, refer to the [Troubleshooting](#troubleshooting) section or review test documentation in `tests/README.md`.
+For questions or issues, refer to the [Troubleshooting](#troubleshooting) section or review test documentation in `tests/TESTING.md`.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**Copyright (c) 2025 Ali Hamza Azam**
