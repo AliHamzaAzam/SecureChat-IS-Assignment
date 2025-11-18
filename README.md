@@ -112,7 +112,7 @@ Security Properties:
 ✓ Confidentiality: AES-128-CBC encryption on all messages
 ✓ Integrity: RSA-PSS-SHA256 signatures (seqno || timestamp || ciphertext)
 ✓ Authenticity: X.509 mutual certificate validation
-✓ Non-Repudiation: Signed receipts + append-only session transcripts
+✓ Non-Repudiation: Session transcripts stored in filesystem
 ✓ Replay Prevention: Monotonically increasing sequence numbers
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -256,7 +256,7 @@ MYSQL_DATABASE=securechat
 
 # Server Configuration
 SERVER_HOST=127.0.0.1
-SERVER_PORT=5000
+SERVER_PORT=9999
 
 # Logging
 LOG_LEVEL=INFO
@@ -314,16 +314,16 @@ certs/
 
 ## Configuration
 
-### Configuration Parameters
+**Configuration Parameters:**
 
 | Parameter | Default | Purpose | File |
 |-----------|---------|---------|------|
-| `MYSQL_HOST` | `127.0.0.1` | MySQL server address | `.env` |
+| `MYSQL_HOST` | `localhost` | MySQL server address | `.env` |
 | `MYSQL_USER` | `scuser` | Database username | `.env` |
 | `MYSQL_PASSWORD` | `scpass` | Database password | `.env` |
 | `MYSQL_DATABASE` | `securechat` | Database name | `.env` |
-| `SERVER_HOST` | `127.0.0.1` | Server bind address | `.env` |
-| `SERVER_PORT` | `5000` | Server TCP port | `.env` |
+| `SERVER_HOST` | `localhost` | Server bind address | `.env` |
+| `SERVER_PORT` | `9999` | Server TCP port | `.env` |
 | `LOG_LEVEL` | `INFO` | Logging verbosity | `.env` |
 
 ### Certificate Paths
@@ -340,37 +340,27 @@ certs/
 
 ### MySQL Database Schema
 
+Currently, only the **`users`** table is created:
+
 ```sql
 CREATE TABLE users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(64) NOT NULL,      -- SHA-256 hex (64 chars)
-    salt VARCHAR(32) NOT NULL,                -- Random hex salt
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE sessions (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(255) NOT NULL,
-    client_fingerprint VARCHAR(64),           -- SHA-256 of client cert
-    login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    logout_time TIMESTAMP NULL,
-    FOREIGN KEY (username) REFERENCES users(username)
-);
-
-CREATE TABLE transcripts (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(255) NOT NULL,
-    session_id INT,
-    timestamp BIGINT,                         -- ms since epoch
-    direction VARCHAR(4),                     -- SENT or RECV
-    seqno INT,
-    ciphertext LONGBLOB,
-    signature LONGBLOB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (username) REFERENCES users(username)
-);
+    email VARCHAR(255) PRIMARY KEY COMMENT 'User email address',
+    username VARCHAR(100) UNIQUE NOT NULL COMMENT 'Unique username',
+    salt VARBINARY(16) NOT NULL COMMENT 'Password salt for hashing',
+    pwd_hash CHAR(64) NOT NULL COMMENT 'SHA-256 password hash (hex)',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Account creation time',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update time'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
+
+**Schema Notes:**
+- `email`: Primary key (unique email address required)
+- `username`: Unique username for login
+- `salt`: Binary salt (16 bytes) for password hashing
+- `pwd_hash`: SHA-256 hash in hexadecimal format (64 characters)
+- `created_at` / `updated_at`: Automatic timestamps
+
+**Session Transcripts:** Stored in filesystem (`transcripts/` directory) as JSON files, not in database.
 
 ---
 
@@ -389,8 +379,8 @@ python -m app.server.server
 [2024-11-09 14:23:15] INFO - Loading certificates...
 ✓ Server certificate loaded: CN=server.local
 ✓ Root CA certificate loaded
-[2024-11-09 14:23:15] INFO - Binding to 127.0.0.1:5000
-[2024-11-09 14:23:15] INFO - Server listening on port 5000
+[2024-11-09 14:23:15] INFO - Binding to localhost:9999
+[2024-11-09 14:23:15] INFO - Server listening on port 9999
 [2024-11-09 14:23:15] INFO - Waiting for clients...
 ```
 
@@ -407,7 +397,7 @@ python -m app.client.client
 [2024-11-09 14:23:20] INFO - Loading certificates...
 ✓ Client certificate loaded: CN=client.local
 ✓ Root CA certificate loaded
-[2024-11-09 14:23:21] INFO - Connecting to 127.0.0.1:5000...
+[2024-11-09 14:23:21] INFO - Connecting to localhost:9999...
 ✓ Connected to server
 ✓ Certificate exchange successful
 ✓ Diffie-Hellman key exchange successful
@@ -431,10 +421,10 @@ Password: MySecure@Pass123
 
 **Behind the Scenes:**
 1. Client generates: `salt = random(16 bytes)`
-2. Client computes: `password_hash = SHA256(password + salt)`
-3. Client sends (encrypted): `{type: "REGISTER", username: "alice", password_hash: hex, salt: hex}`
-4. Server validates username not in `users` table
-5. Server stores: `INSERT INTO users (username, password_hash, salt) VALUES (...)`
+2. Client computes: `pwd_hash = SHA256(password + salt)` (hexadecimal)
+3. Client sends (encrypted): `{type: "REGISTER", username: "alice", pwd_hash: hex, salt: hex, email: "alice@example.com"}`
+4. Server validates username and email not already in `users` table
+5. Server stores: `INSERT INTO users (email, username, pwd_hash, salt) VALUES (...)`
 
 ### Login and Chat
 
@@ -475,8 +465,8 @@ SecureChat (alice)>
 ```bash
 $ python -m app.server.server
 
-[14:30:00] INFO - Server listening on 127.0.0.1:5000
-[14:30:05] INFO - Client connected from 127.0.0.1:54321
+[14:30:00] INFO - Server listening on localhost:9999
+[14:30:05] INFO - Client connected from localhost:54321
 [14:30:05] DEBUG - Certificate exchange: CN=client.local
 [14:30:05] DEBUG - DH exchange: shared secret computed
 [14:30:07] INFO - User 'alice' registered
@@ -493,7 +483,7 @@ $ python -m app.server.server
 ```bash
 $ python -m app.client.client
 
-✓ Connected to 127.0.0.1:5000
+✓ Connected to localhost:9999
 
 SecureChat> register
 Username: alice
@@ -524,7 +514,7 @@ $
 ```bash
 $ python -m app.client.client
 
-✓ Connected to 127.0.0.1:5000
+✓ Connected to localhost:9999
 
 SecureChat> register
 Username: bob
@@ -906,30 +896,30 @@ wireshark tests/evidence/secure_chat.pcap &
 
 **Step 3: Apply Filters**
 
-**Filter 1: All traffic on port 5000**
+**Filter 1: All traffic on port 9999**
 ```
-tcp.port == 5000
+tcp.port == 9999
 ```
 
 **Filter 2: Only MSG packets (encrypted messages)**
 ```
-tcp.port == 5000 && frame contains "MSG"
+tcp.port == 9999 && frame contains "MSG"
 ```
 
 **Filter 3: Certificate exchange**
 ```
-tcp.port == 5000 && frame contains "HELLO"
+tcp.port == 9999 && frame contains "HELLO"
 ```
 
 **Filter 4: Diffie-Hellman exchange**
 ```
-tcp.port == 5000 && frame contains "DH"
+tcp.port == 9999 && frame contains "DH"
 ```
 
 **Expected Findings:**
 
 ```
-Packet 1: TCP SYN (127.0.0.1:12345 → 127.0.0.1:5000)
+Packet 1: TCP SYN (localhost:12345 → localhost:9999)
           [Initial 3-way handshake]
 
 Packet 5: HELLO message
@@ -985,7 +975,7 @@ Packet 22: RECEIPT (signed non-repudiation proof)
 
 **Terminal 1: Start Capture**
 ```bash
-sudo tcpdump -i lo -w tests/evidence/secure_chat.pcap port 5000
+sudo tcpdump -i lo -w tests/evidence/secure_chat.pcap port 9999
 ```
 
 **Terminal 2: Start Server**
@@ -1020,7 +1010,25 @@ wireshark tests/evidence/secure_chat.pcap
 cat tests/evidence/wireshark_report.json | python -m json.tool
 
 # Verify encrypted payloads
-tshark -r tests/evidence/secure_chat.pcap -Y "tcp.port == 5000 && frame contains 'MSG'" -O json | grep -i ciphertext
+tshark -r tests/evidence/secure_chat.pcap -Y "**Filter 1: All traffic on port 9999**
+```
+tcp.port == 9999
+```
+
+**Filter 2: Only MSG packets (encrypted messages)**
+```
+tcp.port == 9999 && frame contains "MSG"
+```
+
+**Filter 3: Certificate exchange**
+```
+tcp.port == 9999 && frame contains "HELLO"
+```
+
+**Filter 4: Diffie-Hellman exchange**
+```
+tcp.port == 9999 && frame contains "DH"
+``` && frame contains 'MSG'" -O json | grep -i ciphertext
 ```
 
 ---
@@ -1074,16 +1082,16 @@ OSError: [Errno 48] Address already in use
 
 **Solution:**
 ```bash
-# Find process using port 5000
-lsof -i :5000              # macOS/Linux
-netstat -ano | findstr :5000  # Windows
+# Find process using port 9999
+lsof -i :9999              # macOS/Linux
+netstat -ano | findstr :9999  # Windows
 
 # Kill process
 kill -9 <PID>              # macOS/Linux
 taskkill /PID <PID> /F     # Windows
 
 # Or change port in .env
-MYSQL_SERVER_PORT=5001
+SERVER_PORT=9998
 ```
 
 ### Issue 4: Authentication Failed
@@ -1114,10 +1122,10 @@ PermissionError: Operation not permitted
 
 **Solution:**
 ```bash
-# tcpdump requires sudo
-python tests/wireshark_capture.py --mode full  # Will prompt for sudo
+# Note: tcpdump requires sudo for packet capture
+python tests/wireshark_capture.py --mode full
 
-# Or run with explicit sudo
+# If permission denied, run with explicit sudo
 sudo python tests/wireshark_capture.py --mode full
 ```
 
@@ -1140,7 +1148,7 @@ python -m app.server.server -v
 cat .env | grep SERVER_PORT
 
 # Try telnet
-telnet 127.0.0.1 5000
+telnet localhost 9999
 ```
 
 ### Issue 7: Signature Verification Fails
