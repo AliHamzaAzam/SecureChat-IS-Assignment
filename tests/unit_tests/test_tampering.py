@@ -37,7 +37,7 @@ from dataclasses import dataclass, asdict
 from hashlib import sha256
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.common.protocol import ChatMsg, serialize_message
 

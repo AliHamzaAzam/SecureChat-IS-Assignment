@@ -51,7 +51,7 @@ def test_certificate_validation():
     logger.info("=" * 70)
     
     try:
-        certs_dir = Path(__file__).parent.parent / "certs"
+        certs_dir = Path(__file__).parent.parent.parent / "certs"  # integration_tests -> tests -> project_root -> certs
         
         # Load certificates
         ca_cert_pem = (certs_dir / "ca_cert.pem").read_text()

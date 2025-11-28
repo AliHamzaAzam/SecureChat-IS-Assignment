@@ -533,7 +533,7 @@ class TestCertificateValidation:
             time.sleep(1)
             
             logger.info("Checking server certificate validity...")
-            certs_dir = Path(__file__).parent.parent / "certs"
+            certs_dir = Path(__file__).parent.parent.parent / "certs"  # integration_tests -> tests -> project_root -> certs
             server_cert = certs_dir / "server_cert.pem"
             
             if server_cert.exists():
@@ -596,7 +596,7 @@ class TestCertificateValidation:
             time.sleep(1)
             
             logger.info("Checking certificate chain...")
-            certs_dir = Path(__file__).parent.parent / "certs"
+            certs_dir = Path(__file__).parent.parent.parent / "certs"  # integration_tests -> tests -> project_root -> certs
             server_cert = certs_dir / "server_cert.pem"
             ca_cert = certs_dir / "ca_cert.pem"
             
@@ -655,7 +655,7 @@ class TestCertificateValidation:
             time.sleep(1)
             
             logger.info("Checking certificate Common Name...")
-            certs_dir = Path(__file__).parent.parent / "certs"
+            certs_dir = Path(__file__).parent.parent.parent / "certs"  # integration_tests -> tests -> project_root -> certs
             server_cert = certs_dir / "server_cert.pem"
             
             if not server_cert.exists():
@@ -722,7 +722,7 @@ class TestCertificateValidation:
             time.sleep(1)
             
             logger.info("Validating certificate signature...")
-            certs_dir = Path(__file__).parent.parent / "certs"
+            certs_dir = Path(__file__).parent.parent.parent / "certs"  # integration_tests -> tests -> project_root -> certs
             server_cert = certs_dir / "server_cert.pem"
             ca_cert = certs_dir / "ca_cert.pem"
             

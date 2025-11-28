@@ -26,8 +26,8 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Tuple, Dict
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to path (parent.parent)
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ExtensionOID
@@ -73,7 +73,7 @@ logger.addHandler(ch)
 # Directories
 TESTS_DIR = Path(__file__).parent
 INVALID_CERTS_DIR = TESTS_DIR / "invalid_certs"
-CERTS_DIR = TESTS_DIR.parent / "certs"
+CERTS_DIR = TESTS_DIR.parent.parent / "certs"  # tests/unit_tests -> tests -> project_root -> certs
 
 
 def ensure_invalid_certs_dir():
