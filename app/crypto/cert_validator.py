@@ -1,11 +1,7 @@
 """
 X.509 certificate validation utilities.
 
-This module provides functions to:
-- Load certificates and private keys from PEM files
-- Validate certificate signatures against a CA certificate
-- Check certificate expiration
-- Generate certificate fingerprints
+Functions: load certs/keys from PEM, validate signatures, check expiration, get fingerprints.
 """
 
 from pathlib import Path
@@ -21,16 +17,9 @@ from cryptography.x509.oid import ExtensionOID
 
 def load_certificate_from_pem_string(pem_string: str) -> x509.Certificate:
     """
-    Load an X.509 certificate from a PEM-encoded string.
-
-    Args:
-        pem_string: PEM-encoded certificate as string
-
-    Returns:
-        Loaded X.509 certificate object
-
-    Raises:
-        ValueError: If the string is not a valid PEM certificate
+    Load X.509 certificate from PEM string.
+    
+    Raises: ValueError if invalid PEM
     """
     try:
         cert_pem = pem_string.encode('utf-8')
@@ -44,17 +33,9 @@ def load_certificate_from_pem_string(pem_string: str) -> x509.Certificate:
 
 def load_certificate(cert_path: str) -> x509.Certificate:
     """
-    Load an X.509 certificate from a PEM file.
-
-    Args:
-        cert_path: Path to the PEM-encoded certificate file
-
-    Returns:
-        Loaded X.509 certificate object
-
-    Raises:
-        FileNotFoundError: If the certificate file doesn't exist
-        ValueError: If the file is not a valid PEM certificate
+    Load X.509 certificate from PEM file.
+    
+    Raises: FileNotFoundError, ValueError
     """
     cert_file = Path(cert_path)
     
@@ -73,18 +54,10 @@ def load_certificate(cert_path: str) -> x509.Certificate:
 
 def load_private_key(key_path: str, password: Optional[bytes] = None) -> rsa.RSAPrivateKey:
     """
-    Load a private key from a PEM file.
-
-    Args:
-        key_path: Path to the PEM-encoded private key file
-        password: Optional password for encrypted keys (None for unencrypted)
-
-    Returns:
-        Loaded RSA private key object
-
-    Raises:
-        FileNotFoundError: If the key file doesn't exist
-        ValueError: If the file is not a valid PEM private key
+    Load RSA private key from PEM file.
+    
+    Args: key_path, password (optional)
+    Raises: FileNotFoundError, ValueError
     """
     key_file = Path(key_path)
     
@@ -107,17 +80,10 @@ def load_private_key(key_path: str, password: Optional[bytes] = None) -> rsa.RSA
 
 def load_private_key_from_pem_string(pem_string: str, password: Optional[bytes] = None) -> rsa.RSAPrivateKey:
     """
-    Load a private key from a PEM-encoded string.
-
-    Args:
-        pem_string: PEM-encoded private key as string
-        password: Optional password for encrypted keys (None for unencrypted)
-
-    Returns:
-        Loaded RSA private key object
-
-    Raises:
-        ValueError: If the string is not a valid PEM private key
+    Load RSA private key from PEM string.
+    
+    Args: pem_string, password (optional)
+    Raises: ValueError
     """
     try:
         key_pem = pem_string.encode('utf-8')
@@ -136,20 +102,9 @@ def load_private_key_from_pem_string(pem_string: str, password: Optional[bytes] 
 def validate_certificate(cert: x509.Certificate, 
                         ca_cert: x509.Certificate) -> Tuple[bool, Optional[str]]:
     """
-    Validate an X.509 certificate against a CA certificate.
-
-    This function checks:
-    1. The certificate signature is valid (signed by the CA)
-    2. The certificate is not expired (current time is within validity period)
-
-    Args:
-        cert: Certificate to validate
-        ca_cert: CA certificate used to verify the signature
-
-    Returns:
-        Tuple of (is_valid: bool, error_message: str or None)
-        - If valid: (True, None)
-        - If invalid: (False, descriptive error message)
+    Validate certificate against CA (signature + expiration check).
+    
+    Returns: (is_valid, error_message or None)
     """
     try:
         # Check certificate expiration using UTC timezone-aware datetime

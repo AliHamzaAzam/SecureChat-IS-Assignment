@@ -1,36 +1,9 @@
 """
-Diffie-Hellman key agreement utilities.
+Diffie-Hellman key exchange using RFC 3526 Group 14 (2048-bit safe prime).
 
-This module implements the Diffie-Hellman (DH) key exchange protocol for establishing
-a shared symmetric key between two parties:
-
-Mathematical notation:
-    p: Safe prime (2048-bit from RFC 3526 Group 14)
-    g: Generator (g = 2)
-    a: Alice's private key (256-bit random)
-    b: Bob's private key (256-bit random)
-    A = g^a mod p: Alice's public key
-    B = g^b mod p: Bob's public key
-    Ks = B^a mod p = A^b mod p: Shared secret
-    session_key = SHA256(Ks_bytes)[:16]: AES-128 key
-
-Usage:
-    from app.crypto.dh_exchange import generate_dh_keypair, compute_shared_secret
-
-    # Alice generates her keypair
-    alice_private, alice_public = generate_dh_keypair()
-
-    # Bob generates his keypair
-    bob_private, bob_public = generate_dh_keypair()
-
-    # They exchange public keys (over untrusted channel)
-    # Alice computes shared secret using Bob's public key
-    alice_session_key = compute_shared_secret(alice_private, bob_public)
-
-    # Bob computes shared secret using Alice's public key
-    bob_session_key = compute_shared_secret(bob_private, alice_public)
-
-    # alice_session_key == bob_session_key (same AES-128 key)
+Protocol: Alice generates (a, A=g^a mod p), Bob generates (b, B=g^b mod p)
+Shared secret: Ks = B^a mod p = A^b mod p
+Session key: SHA256(Ks)[:16] (AES-128)
 """
 
 from typing import Tuple
@@ -52,15 +25,9 @@ PRIVATE_KEY_BITS = 256
 
 def generate_dh_keypair() -> Tuple[int, int]:
     """
-    Generate a Diffie-Hellman keypair.
-
-    Generates a random 256-bit private key and computes the corresponding
-    public key using: A = g^a mod p
-
-    Returns:
-        Tuple of (private_key: int, public_key: int)
-        - private_key: Random 256-bit integer
-        - public_key: g^private_key mod p
+    Generate DH keypair: (private_key, public_key=g^private mod p).
+    
+    Returns: (256-bit private key, public key)
     """
     # Generate random private key (256 bits)
     private_key = secrets.randbits(PRIVATE_KEY_BITS)
@@ -77,20 +44,13 @@ def generate_dh_keypair() -> Tuple[int, int]:
 
 def compute_shared_secret(private_key: int, peer_public_key: int) -> bytes:
     """
-    Compute the shared secret from peer's public key.
-
-    Computes the shared secret: Ks = peer_public_key^private_key mod p
-    Then derives an AES-128 key: session_key = SHA256(Ks_bytes)[:16]
-
-    Args:
-        private_key: Own private key (integer)
-        peer_public_key: Peer's public key (integer)
-
-    Returns:
-        bytes: 16-byte AES-128 session key
-
-    Raises:
-        ValueError: If peer_public_key is invalid
+    Compute shared secret and derive AES-128 key.
+    
+    Computes: Ks = peer_public_key^private_key mod p
+    Derives: SHA256(Ks)[:16]
+    
+    Returns: 16-byte AES-128 session key
+    Raises: ValueError if peer_public_key invalid
     """
     # Validate peer's public key
     if not isinstance(peer_public_key, int):

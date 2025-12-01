@@ -1,33 +1,11 @@
 """
-SecureChat TCP client with basic protocol communication.
+SecureChat TCP client with certificate-based authentication.
 
-This module implements a basic TCP client that:
-    1. Loads client certificate and private key from certs/
-    2. Connects to a remote server
-    3. Sends and receives JSON messages with length-prefixed framing
-    4. Provides a menu-driven interface for user interactions
+Implements length-prefixed JSON protocol with mutual TLS authentication,
+DH key exchange, encrypted messaging, and session receipts.
 
-Message Framing:
-    Each message is prefixed with a 4-byte big-endian length field:
-    [4 bytes: message length] [JSON message data]
-    
-    Example:
-        Message: {"type":"HELLO","nonce":"abc123"}
-        Length: 37 bytes
-        Wire format: 0x00 0x00 0x00 0x25 {"type":"HELLO","nonce":"abc123"}
-
-Client Architecture:
-    - Single-threaded for simplicity
-    - Blocking socket operations
-    - Length-prefixed protocol for reliable message boundaries
-    - Error handling for network and protocol errors
-
-Usage:
-    python -m app.client.client
-
-Environment Variables (.env):
-    SERVER_HOST: Server hostname or IP (default: 127.0.0.1)
-    SERVER_PORT: Server port (default: 5000)
+Usage: python -m app.client.client
+Env: SERVER_HOST, SERVER_PORT (default: 127.0.0.1:5000)
 """
 
 import socket
@@ -89,24 +67,10 @@ MAX_MESSAGE_SIZE = 1024 * 1024  # 1 MB max message size
 
 def load_client_credentials():
     """
-    Load client certificate and private key from disk.
-
-    Reads PEM-formatted certificate and private key files from the certs/ directory.
-    These are used for authentication with the server.
-
-    Returns:
-        Tuple of (cert_pem: str, key_pem: str)
-        - cert_pem: PEM-encoded X.509 certificate
-        - key_pem: PEM-encoded RSA private key
-
-    Raises:
-        FileNotFoundError: If certificate or key files don't exist
-        IOError: If files cannot be read
-
-    Example:
-        >>> cert, key = load_client_credentials()
-        >>> "BEGIN CERTIFICATE" in cert
-        True
+    Load client certificate and private key from certs/ directory.
+    
+    Returns: (cert_pem, key_pem) tuple
+    Raises: FileNotFoundError, IOError
     """
     try:
         if not CLIENT_CERT_PATH.exists():
@@ -136,26 +100,11 @@ def load_client_credentials():
 
 def connect_to_server(host: str, port: int) -> socket.socket:
     """
-    Create TCP connection to the server.
-
-    Establishes a TCP socket connection to the specified server address.
-    The socket is returned for use with send_message() and receive_message().
-
-    Args:
-        host: Server hostname or IP address
-        port: Server port number
-
-    Returns:
-        socket.socket: Connected socket object
-
-    Raises:
-        socket.error: If connection fails
-        ValueError: If host or port invalid
-
-    Example:
-        >>> sock = connect_to_server("127.0.0.1", 5000)
-        >>> # sock is now connected to server
-        >>> sock.close()
+    Create TCP connection to server.
+    
+    Args: host (str), port (int)
+    Returns: Connected socket
+    Raises: socket.error, ValueError
     """
     if not isinstance(host, str):
         raise ValueError(f"host must be string, got {type(host)}")
@@ -193,26 +142,10 @@ def connect_to_server(host: str, port: int) -> socket.socket:
 
 def send_message(sock: socket.socket, message_dict: dict) -> None:
     """
-    Send a message to the server with length-prefixed framing.
-
-    Serializes the message dictionary to JSON, prepends a 4-byte big-endian
-    length field, and sends over the socket.
-
-    Message format:
-        [4 bytes: length] [JSON data]
-
-    Args:
-        sock: Connected socket object
-        message_dict: Message dictionary to send
-
-    Raises:
-        TypeError: If message_dict is not a dictionary
-        socket.error: If send fails
-        ValueError: If message too large
-
-    Example:
-        >>> msg = {"type": "HELLO", "nonce": "abc123"}
-        >>> send_message(sock, msg)
+    Send JSON message with 4-byte length prefix.
+    
+    Args: sock, message_dict
+    Raises: TypeError, socket.error, ValueError
     """
     if not isinstance(message_dict, dict):
         raise TypeError(f"message_dict must be dict, got {type(message_dict)}")
@@ -250,25 +183,11 @@ def send_message(sock: socket.socket, message_dict: dict) -> None:
 
 def receive_message(sock: socket.socket) -> dict:
     """
-    Receive a message from the server with length-prefixed framing.
-
-    Reads the 4-byte length prefix, then reads exactly that many bytes of JSON data.
-    Deserializes the JSON to a dictionary.
-
-    Args:
-        sock: Connected socket object
-
-    Returns:
-        dict: Deserialized message dictionary
-
-    Raises:
-        socket.error: If receive fails or connection closed
-        ValueError: If message format invalid or too large
-
-    Example:
-        >>> msg_dict = receive_message(sock)
-        >>> msg_dict["type"]
-        'HELLO'
+    Receive and deserialize length-prefixed JSON message.
+    
+    Args: sock
+    Returns: Message dictionary
+    Raises: socket.error, ValueError
     """
     try:
         # Read length prefix (4 bytes, big-endian)
@@ -332,25 +251,12 @@ def receive_message(sock: socket.socket) -> dict:
 
 def exchange_certificates(sock: socket.socket, client_cert_pem: str) -> str:
     """
-    Perform certificate exchange with server.
-
-    Implements the client side of the certificate exchange protocol:
-        1. Send HELLO with client certificate and nonce
-        2. Receive SERVER_HELLO from server with server certificate
-        3. Validate server certificate against CA
-        4. Store server certificate for session
-
-    Args:
-        sock: Connected socket to server
-        client_cert_pem: Client's PEM-encoded certificate
-
-    Returns:
-        str: Server's PEM-encoded certificate if successful
-
-    Raises:
-        socket.error: If socket operations fail
-        ValueError: If certificate validation fails or protocol error
-        Exception: For any other protocol-level errors
+    Exchange and validate certificates with server.
+    
+    Steps: Send HELLO+cert, receive SERVER_HELLO, validate against CA.
+    
+    Returns: Server's PEM certificate
+    Raises: socket.error, ValueError
     """
     try:
         # Step 1: Send HELLO with client certificate and nonce
@@ -454,24 +360,12 @@ def exchange_certificates(sock: socket.socket, client_cert_pem: str) -> str:
 
 def perform_dh_exchange(sock: socket.socket) -> bytes:
     """
-    Perform Diffie-Hellman key agreement with server for session encryption.
-
-    Implements the client side of DH key exchange:
-        1. Generate client DH keypair (a, A)
-        2. Send DH_CLIENT with g, p, and A
-        3. Receive DH_SERVER with server's public key B
-        4. Compute shared secret and derive AES-128 session key
-
-    Args:
-        sock: Connected socket to server
-
-    Returns:
-        bytes: 16-byte AES-128 session key
-
-    Raises:
-        socket.error: If socket operations fail
-        ValueError: If protocol error or invalid DH parameters
-        Exception: For any other errors
+    Perform DH key exchange and derive AES-128 session key.
+    
+    Steps: Generate keypair, send DH_CLIENT, receive DH_SERVER, compute shared secret.
+    
+    Returns: 16-byte AES-128 session key
+    Raises: socket.error, ValueError
     """
     try:
         logger.info("Starting DH key exchange")
@@ -578,19 +472,10 @@ def perform_dh_exchange(sock: socket.socket) -> bytes:
 
 def register_user(sock: socket.socket, session_key: bytes):
     """
-    Perform user registration with encrypted credentials.
-
-    Prompts user for email, username, and password, generates random salt,
-    computes salted SHA-256 hash, and sends encrypted registration data.
-
-    Args:
-        sock: Connected socket to server
-        session_key: 16-byte AES-128 session key from DH exchange
-
-    Raises:
-        socket.error: If socket operations fail
-        ValueError: If encryption fails
-        Exception: For any other errors
+    Register user with encrypted credentials (email, username, salted hash).
+    
+    Args: sock, session_key (AES-128)
+    Raises: socket.error, ValueError
     """
     try:
         print("\n" + "=" * 50)
@@ -714,25 +599,12 @@ def register_user(sock: socket.socket, session_key: bytes):
 def receive_server_messages(sock: socket.socket, chat_session_key: bytes, server_cert_pem: str,
                             username: str, session_ts: int):
     """
-    Receive and process encrypted messages from server.
-
-    Runs in a separate thread to receive server messages while client sends messages.
-    Implements message reception with:
-    - Sequence number replay protection
-    - RSA-PSS signature verification using server certificate
-    - AES-128-CBC decryption
-    - Message display
-    - Append-only transcript logging for non-repudiation
-
-    Args:
-        sock: Connected socket to server
-        chat_session_key: 16-byte AES-128 chat session key
-        server_cert_pem: PEM-encoded server certificate for signature verification
-        username: Authenticated username for transcript logging
-        session_ts: Session start timestamp (ms since epoch) for transcript
-
-    Raises:
-        socket.error: If socket operations fail
+    Receive, verify, decrypt, and log encrypted messages from server.
+    
+    Runs in separate thread. Implements replay protection, signature verification, 
+    AES decryption, and transcript logging.
+    
+    Raises: socket.error
     """
     try:
         logger.info("Starting server message receiver thread")
@@ -1046,21 +918,10 @@ def chat_message_loop(sock: socket.socket, chat_session_key: bytes, username: st
 
 def perform_chat_dh_exchange(sock: socket.socket) -> bytes:
     """
-    Perform DH key exchange for chat session (fresh keypair).
-
-    After successful login, initiates a new DH exchange specifically for
-    encrypting chat messages. Uses a fresh keypair separate from the
-    login/registration encryption key.
-
-    Args:
-        sock: Connected socket to server
-
-    Returns:
-        bytes: 16-byte AES-128 chat session key
-
-    Raises:
-        socket.error: If socket operations fail
-        ValueError: If key derivation fails
+    Perform fresh DH exchange for chat session key.
+    
+    Returns: 16-byte AES-128 chat key
+    Raises: socket.error, ValueError
     """
     try:
         logger.info("Starting chat session DH key exchange")
@@ -1133,21 +994,12 @@ def perform_chat_dh_exchange(sock: socket.socket) -> bytes:
 
 def login_user(sock: socket.socket, session_key: bytes, key_pem: str, server_cert_pem: str):
     """
-    Perform user login with encrypted credentials and dual-gate authentication.
-
-    Prompts user for email and password, encrypts and sends login data to server
-    over the established DH session. Server verifies both certificate and password.
-
-    Args:
-        sock: Connected socket to server
-        session_key: 16-byte AES-128 session key from DH exchange
-        key_pem: PEM-encoded client private key for message signing
-        server_cert_pem: PEM-encoded server certificate for verifying server messages
-
-    Raises:
-        socket.error: If socket operations fail
-        ValueError: If encryption fails
-        Exception: For any other errors
+    Login with encrypted credentials (email, password).
+    
+    Uses dual-gate auth: certificate + password validation.
+    
+    Args: sock, session_key, key_pem, server_cert_pem
+    Raises: socket.error, ValueError
     """
     try:
         print("\n" + "=" * 50)

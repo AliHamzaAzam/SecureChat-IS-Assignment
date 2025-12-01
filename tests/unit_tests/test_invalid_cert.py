@@ -2,21 +2,11 @@
 """
 Certificate Validation Test Suite
 
-Tests for invalid certificate scenarios:
-1. Expired certificate
-2. Self-signed certificate (not signed by CA)
-3. Certificate with wrong CN/SAN
-4. Not yet valid certificate
-5. Invalid signature
+Tests: expired cert, self-signed cert, wrong CN/SAN, not yet valid cert, invalid signature.
+Verifies SecureChat properly rejects invalid certificates.
 
-This test suite verifies that SecureChat properly rejects invalid certificates
-and gracefully handles certificate validation errors.
-
-Usage:
-    python tests/test_invalid_cert.py
-
-Output:
-    Test results logged to tests/cert_validation_test.log
+Usage: python tests/test_invalid_cert.py
+Output: tests/cert_validation_test.log
 """
 
 import sys
@@ -83,12 +73,7 @@ def ensure_invalid_certs_dir():
 
 
 def generate_key_pair() -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
-    """
-    Generate a 2048-bit RSA key pair.
-    
-    Returns:
-        (private_key, public_key) tuple
-    """
+    """Generate 2048-bit RSA key pair."""
     private_key = rsa.generate_private_key(
         public_exponent=65537,
         key_size=2048,
@@ -101,17 +86,7 @@ def create_self_signed_cert(
     days_valid: int = 365,
     backdated_days: int = 0
 ) -> x509.Certificate:
-    """
-    Create a self-signed certificate (not signed by CA).
-    
-    Args:
-        common_name: CN for the certificate
-        days_valid: Number of days the cert is valid
-        backdated_days: Number of days to backdate (for expiration tests)
-        
-    Returns:
-        Self-signed X.509 certificate
-    """
+    """Create self-signed certificate (not signed by CA)."""
     private_key, _ = generate_key_pair()
     
     subject = issuer = x509.Name([
@@ -152,18 +127,7 @@ def create_ca_signed_cert_with_wrong_cn(
     correct_cn: str,
     wrong_cn: str
 ) -> x509.Certificate:
-    """
-    Create a CA-signed certificate but with wrong CN/SAN.
-    
-    Args:
-        ca_private_key: CA's private key
-        ca_cert: CA's certificate
-        correct_cn: What CN should be (e.g., "server.local")
-        wrong_cn: What CN actually is (e.g., "attacker.local")
-        
-    Returns:
-        CA-signed certificate with mismatched CN
-    """
+    """Create CA-signed certificate with mismatched CN/SAN."""
     private_key, _ = generate_key_pair()
     
     subject = x509.Name([
@@ -198,17 +162,7 @@ def create_ca_signed_cert_with_wrong_cn(
 def save_cert_and_key(cert: x509.Certificate, 
                       private_key: rsa.RSAPrivateKey,
                       name: str) -> Tuple[Path, Path]:
-    """
-    Save certificate and private key to PEM files.
-    
-    Args:
-        cert: X.509 certificate
-        private_key: RSA private key
-        name: Base name for files (e.g., "expired_server")
-        
-    Returns:
-        (cert_path, key_path) tuple
-    """
+    """Save certificate and private key to PEM files."""
     cert_path = INVALID_CERTS_DIR / f"{name}_cert.pem"
     key_path = INVALID_CERTS_DIR / f"{name}_key.pem"
     
@@ -235,12 +189,7 @@ def save_cert_and_key(cert: x509.Certificate,
 # ============================================================================
 
 def test_expired_certificate():
-    """
-    Test Case 1: Expired Certificate
-    
-    Create a certificate that expired yesterday.
-    Validation should fail with expiration error.
-    """
+    """Test expired certificate is rejected."""
     logger.info("=" * 70)
     logger.info("TEST 1: Expired Certificate")
     logger.info("=" * 70)
@@ -338,12 +287,7 @@ def test_expired_certificate():
 
 
 def test_self_signed_certificate():
-    """
-    Test Case 2: Self-Signed Certificate (Not Signed by CA)
-    
-    Create a self-signed certificate that's not signed by the CA.
-    Validation should fail with signature verification error.
-    """
+    """Test self-signed certificate (not CA-signed) is rejected."""
     logger.info("=" * 70)
     logger.info("TEST 2: Self-Signed Certificate")
     logger.info("=" * 70)
@@ -407,12 +351,7 @@ def test_self_signed_certificate():
 
 
 def test_wrong_cn_certificate():
-    """
-    Test Case 3: Certificate with Wrong CN/SAN
-    
-    Create a certificate signed by CA but with wrong CN/SAN.
-    Manual CN validation should detect mismatch.
-    """
+    """Test certificate with wrong CN/SAN is detected."""
     logger.info("=" * 70)
     logger.info("TEST 3: Certificate with Wrong CN/SAN")
     logger.info("=" * 70)
@@ -489,12 +428,7 @@ def test_wrong_cn_certificate():
 
 
 def test_not_yet_valid_certificate():
-    """
-    Test Case 4: Certificate Not Yet Valid
-    
-    Create a certificate that won't be valid until tomorrow.
-    Validation should fail with "not yet valid" error.
-    """
+    """Test certificate not yet valid is rejected."""
     logger.info("=" * 70)
     logger.info("TEST 4: Certificate Not Yet Valid")
     logger.info("=" * 70)
@@ -592,12 +526,7 @@ def test_not_yet_valid_certificate():
 
 
 def test_invalid_signature():
-    """
-    Test Case 5: Certificate with Invalid Signature
-    
-    Create a certificate and then tamper with the signature.
-    Validation should fail with signature verification error.
-    """
+    """Test certificate signature validation."""
     logger.info("=" * 70)
     logger.info("TEST 5: Certificate with Invalid Signature")
     logger.info("=" * 70)

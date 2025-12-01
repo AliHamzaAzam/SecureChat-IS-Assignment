@@ -2,46 +2,9 @@
 User registration and authentication utilities.
 
 This module provides secure user registration and login verification with proper
-password hashing and constant-time comparison to prevent timing attacks.
+User registration and authentication with salted SHA-256 password hashing.
 
-Password Security:
-    - Salt: 16-byte random value per user (prevents rainbow table attacks)
-    - Hash: SHA-256 of (salt + password) (cryptographically secure)
-    - Comparison: secrets.compare_digest() (constant-time, prevents timing attacks)
-
-Database Schema Expected:
-    CREATE TABLE users (
-        email VARCHAR(255) PRIMARY KEY,
-        username VARCHAR(255) UNIQUE NOT NULL,
-        salt BINARY(16) NOT NULL,
-        pwd_hash VARCHAR(64) NOT NULL
-    );
-
-Usage:
-    from app.storage.db import get_connection
-    from app.server.registration import register_user, verify_login
-
-    db = get_connection()
-
-    # Register a new user
-    success, message = register_user("alice@example.com", "alice", "password123", db)
-    if success:
-        print(f"Registered: {message}")
-    else:
-        print(f"Error: {message}")
-
-    # Verify login
-    success, username = verify_login("alice@example.com", "password123", db)
-    if success:
-        print(f"Login successful: {username}")
-    else:
-        print("Login failed")
-
-Security Considerations:
-    - Passwords are never logged or printed
-    - Salt is randomly generated per user (prevents duplicate hashes)
-    - Constant-time comparison prevents timing attacks during login
-    - Database errors don't leak information (generic error messages)
+Security: Random per-user salts, constant-time comparison (prevents timing attacks).
 """
 
 import hashlib
@@ -53,16 +16,9 @@ import mysql.connector
 def _hash_password(salt: bytes, password: str) -> str:
     """
     Compute SHA-256 hash of salt + password.
-
-    Args:
-        salt: 16-byte salt value
-        password: User's password string
-
-    Returns:
-        str: 64-character hexadecimal SHA-256 digest
-
-    Raises:
-        TypeError: If salt is not bytes or password is not str
+    
+    Returns: 64-char hex digest
+    Raises: TypeError
     """
     if not isinstance(salt, bytes):
         raise TypeError(f"salt must be bytes, got {type(salt)}")
@@ -86,32 +42,12 @@ def register_user(
     db_connection,
 ) -> Tuple[bool, str]:
     """
-    Register a new user with secure password hashing.
-
-    Generates a 16-byte random salt, computes SHA-256 hash of salt + password,
-    and stores in database if email and username don't already exist.
-
-    Args:
-        email: User's email address (will be primary key)
-        username: Display name (must be unique)
-        password: User's password (will be hashed with salt)
-        db_connection: MySQL database connection
-
-    Returns:
-        Tuple of (success: bool, message: str)
-        - On success: (True, "User registered successfully: <username>")
-        - On failure: (False, "<error_message>")
-
-    Raises:
-        TypeError: If arguments are of wrong type
-        AttributeError: If db_connection is not a valid connection
-
-    Example:
-        >>> from app.storage.db import get_connection
-        >>> db = get_connection()
-        >>> success, msg = register_user("bob@example.com", "bob", "pass123", db)
-        >>> if success:
-        ...     print("Registered:", msg)
+    Register new user with salted SHA-256 password hash.
+    
+    Generates random 16-byte salt, computes hash, stores if email/username available.
+    
+    Args: email, username, password, db_connection
+    Returns: (success: bool, message: str)
     """
     # Input validation
     if not isinstance(email, str):
@@ -174,31 +110,12 @@ def verify_login(
     db_connection,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Verify user login credentials with constant-time comparison.
-
-    Retrieves stored salt and pwd_hash, recomputes hash with provided password,
-    and uses secrets.compare_digest() for secure comparison.
-
-    Args:
-        email: User's email address
-        password: Password to verify
-        db_connection: MySQL database connection
-
-    Returns:
-        Tuple of (success: bool, username: str or None)
-        - On success: (True, "<username>")
-        - On failure: (False, None)
-
-    Raises:
-        TypeError: If arguments are of wrong type
-        AttributeError: If db_connection is not a valid connection
-
-    Example:
-        >>> from app.storage.db import get_connection
-        >>> db = get_connection()
-        >>> success, username = verify_login("bob@example.com", "pass123", db)
-        >>> if success:
-        ...     print(f"Welcome, {username}!")
+    Verify login with constant-time comparison.
+    
+    Retrieves salt+hash, recomputes hash, uses secrets.compare_digest() for secure comparison.
+    
+    Args: email, password, db_connection
+    Returns: (success: bool, username: str or None)
     """
     # Input validation
     if not isinstance(email, str):

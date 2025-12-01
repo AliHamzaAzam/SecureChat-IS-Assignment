@@ -1,27 +1,11 @@
 """
 SecureChat TCP server with certificate-based authentication.
 
-This module implements a basic TCP server that:
-    1. Loads server certificate and private key from certs/
-    2. Listens on a configurable port (default 5000)
-    3. Accepts client connections
-    4. Handles certificate exchange and protocol handshake
-    5. Manages graceful shutdown on SIGINT (Ctrl+C)
+Listens on configurable port (default 5000), validates client certificates,
+handles DH key exchange, and manages encrypted chat sessions.
 
-Server Architecture:
-    - Single-threaded for simplicity (can be extended with threading/asyncio)
-    - Certificate validation for all clients
-    - Logging of all connections with timestamps
-    - Graceful error handling and resource cleanup
-
-Usage:
-    python -m app.server.server
-
-    To stop the server: Press Ctrl+C
-
-Environment Variables (.env):
-    SERVER_PORT: Port to listen on (default: 5000)
-    SERVER_HOST: Host to bind to (default: 127.0.0.1)
+Usage: python -m app.server.server (Ctrl+C to stop)
+Env: SERVER_HOST, SERVER_PORT (default: 127.0.0.1:5000)
 """
 
 import socket
@@ -85,24 +69,10 @@ shutdown_flag = False
 
 def load_server_credentials():
     """
-    Load server certificate and private key from disk.
-
-    Reads PEM-formatted certificate and private key files from the certs/ directory.
-    These are used for authentication with clients.
-
-    Returns:
-        Tuple of (cert_pem: str, key_pem: str)
-        - cert_pem: PEM-encoded X.509 certificate
-        - key_pem: PEM-encoded RSA private key
-
-    Raises:
-        FileNotFoundError: If certificate or key files don't exist
-        IOError: If files cannot be read
-
-    Example:
-        >>> cert, key = load_server_credentials()
-        >>> "BEGIN CERTIFICATE" in cert
-        True
+    Load server certificate and private key from certs/ directory.
+    
+    Returns: (cert_pem, key_pem) tuple
+    Raises: FileNotFoundError, IOError
     """
     try:
         with open(SERVER_CERT_PATH, "r") as f:
@@ -119,25 +89,12 @@ def load_server_credentials():
 def receive_chat_messages(client_socket: socket.socket, client_id: str, username: str, 
                           chat_session_key: bytes, client_cert_pem: str, session_ts: int):
     """
-    Receive and process encrypted chat messages from client.
-
-    Implements message reception loop with:
-    - Sequence number replay protection
-    - RSA-PSS signature verification
-    - AES-128-CBC decryption
-    - Message display
-    - Append-only transcript logging for non-repudiation
-
-    Args:
-        client_socket: Connected socket to client
-        client_id: Client identifier for logging
-        username: Authenticated username
-        chat_session_key: 16-byte AES-128 chat session key
-        client_cert_pem: PEM-encoded client certificate for signature verification
-        session_ts: Session start timestamp (ms since epoch) for transcript
-
-    Raises:
-        socket.error: If socket operations fail
+    Receive, verify, decrypt, and log encrypted messages from client.
+    
+    Runs in separate thread. Implements replay protection, signature verification,
+    AES decryption, and transcript logging.
+    
+    Raises: socket.error
     """
     try:
         logger.info(f"[{client_id}] Entering message reception loop for {username}")
@@ -294,25 +251,12 @@ def send_chat_message_loop(client_socket: socket.socket, client_id: str, usernam
                           chat_session_key: bytes, server_key_pem: str, server_cert_pem: str,
                           client_cert_pem: str, session_ts: int):
     """
-    Server console input loop: read messages, encrypt, sign, and send to client.
-
-    Reads server console input, encrypts with chat session key, creates RSA-PSS signature,
-    and sends ChatMsg with sequence number and timestamp for replay protection.
-    Also writes append-only transcript entries for non-repudiation.
-
-    Args:
-        client_socket: Connected socket to client
-        client_id: Client identifier for logging
-        username: Authenticated client username for display
-        chat_session_key: 16-byte AES-128 chat session key
-        server_key_pem: PEM-encoded server private key for signing
-        server_cert_pem: PEM-encoded server certificate (for display/logging)
-        client_cert_pem: PEM-encoded client certificate for fingerprinting
-        session_ts: Session start timestamp (ms since epoch) for transcript
-
-    Raises:
-        socket.error: If socket operations fail
-        Exception: For any other errors
+    Server console input loop: read, encrypt, sign, send messages to client.
+    
+    Prompts console input, encrypts with chat key, signs with RSA-PSS, sends with
+    sequence numbers and timestamps. Writes transcript entries.
+    
+    Raises: socket.error
     """
     try:
         logger.info(f"[{client_id}] Server sending messages to {username}")
@@ -465,24 +409,10 @@ def send_chat_message_loop(client_socket: socket.socket, client_id: str, usernam
 
 def load_server_credentials():
     """
-    Load server certificate and private key from disk.
-
-    Reads PEM-formatted certificate and private key files from the certs/ directory.
-    These are used for authentication with clients.
-
-    Returns:
-        Tuple of (cert_pem: str, key_pem: str)
-        - cert_pem: PEM-encoded X.509 certificate
-        - key_pem: PEM-encoded RSA private key
-
-    Raises:
-        FileNotFoundError: If certificate or key files don't exist
-        IOError: If files cannot be read
-
-    Example:
-        >>> cert, key = load_server_credentials()
-        >>> "BEGIN CERTIFICATE" in cert
-        True
+    Load server certificate and private key from certs/ directory.
+    
+    Returns: (cert_pem, key_pem) tuple
+    Raises: FileNotFoundError, IOError
     """
     try:
         if not SERVER_CERT_PATH.exists():
@@ -512,23 +442,12 @@ def load_server_credentials():
 
 def handle_client(client_socket: socket.socket, client_address: tuple, server_cert_pem: str, server_key_pem: str):
     """
-    Handle a single client connection with certificate validation.
-
-    Processes the client connection lifecycle:
-        1. Send SERVER_HELLO with certificate and nonce
-        2. Receive and validate client HELLO with certificate
-        3. Establish trusted session or reject on validation failure
-        4. TODO: Continue with DH key exchange and messaging
-
-    Args:
-        client_socket: Connected socket for the client
-        client_address: Tuple of (client_ip, client_port)
-        server_cert_pem: Server's PEM-encoded certificate
-        server_key_pem: Server's PEM-encoded private key for signing messages
-
-    Raises:
-        socket.error: If socket operations fail
-        Exception: For any protocol-level errors
+    Handle client connection: cert exchange, DH exchange, auth, chat session.
+    
+    Full workflow: HELLO exchange, certificate validation, DH key agreement,
+    registration/login, chat session, receipt exchange.
+    
+    Raises: socket.error
     """
     client_ip, client_port = client_address
     client_id = f"{client_ip}:{client_port}"

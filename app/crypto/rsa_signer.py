@@ -1,40 +1,12 @@
 """
-RSA digital signature utilities for authentication and non-repudiation.
+RSA-2048 digital signatures with SHA-256 and PSS padding.
 
-This module provides functions for signing and verifying data using RSA-2048 with SHA-256.
-
-Signature Scheme:
-    Algorithm: RSA-2048
-    Padding: PSS (Probabilistic Signature Scheme)
-    Hash: SHA-256
-    Salt Length: 32 bytes (SHA256 output size)
-
-The signature provides:
-    - Authentication: Verify signer's identity
-    - Integrity: Ensure data hasn't been tampered with
-    - Non-repudiation: Signer cannot deny having signed
+Provides: Authentication, Integrity, Non-repudiation
+Algorithm: RSA-2048, Padding: PSS, Hash: SHA-256
 
 Usage:
-    from app.crypto.rsa_signer import sign_data, verify_signature, compute_sha256
-    from app.crypto.cert_validator import load_certificate, load_private_key
-
-    # Load signing key
-    private_key = load_private_key("server_key.pem")
-
-    # Sign some data
-    data = b"Important message"
-    signature = sign_data(data, private_key)
-
-    # Verify signature using certificate
-    certificate = load_certificate("server_cert.pem")
-    is_valid = verify_signature(data, signature, certificate)
-    if not is_valid:
-        raise ValueError("Signature verification failed!")
-
-RSA-PSS Security:
-    - Probabilistic: Same message produces different signatures (randomness in padding)
-    - Secure: Resistant to known attacks on RSA signatures
-    - Standard: Recommended by PKCS#1 v2.1
+    sig = sign_data(data, private_key)
+    is_valid = verify_signature(data, sig, certificate)
 """
 
 from typing import Union
@@ -74,25 +46,10 @@ def compute_sha256(data: bytes) -> bytes:
 def sign_data(data: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
     """
     Sign data using RSA-2048 with SHA-256 and PSS padding.
-
-    Args:
-        data: Bytes to sign
-        private_key: RSA private key for signing
-
-    Returns:
-        bytes: RSA-PSS signature
-
-    Raises:
-        TypeError: If data is not bytes or private_key is not RSA key
-        ValueError: If signing fails
-
-    Example:
-        >>> from app.crypto.cert_validator import load_private_key
-        >>> private_key = load_private_key("server_key.pem")
-        >>> data = b"Message to sign"
-        >>> signature = sign_data(data, private_key)
-        >>> len(signature) > 0
-        True
+    
+    Args: data, private_key
+    Returns: RSA-PSS signature bytes
+    Raises: TypeError, ValueError
     """
     if not isinstance(data, bytes):
         raise TypeError(f"data must be bytes, got {type(data)}")
@@ -121,32 +78,10 @@ def verify_signature(
     certificate: x509.Certificate,
 ) -> bool:
     """
-    Verify an RSA-PSS signature using a certificate's public key.
-
-    Args:
-        data: Original bytes that were signed
-        signature: RSA-PSS signature bytes
-        certificate: X.509 certificate containing the public key
-
-    Returns:
-        bool: True if signature is valid, False otherwise
-
-    Raises:
-        TypeError: If parameters are of wrong type
-        ValueError: If verification cannot proceed
-
-    Example:
-        >>> from app.crypto.cert_validator import load_certificate
-        >>> from app.crypto.rsa_signer import sign_data, verify_signature
-        >>> from app.crypto.cert_validator import load_private_key
-        >>> 
-        >>> private_key = load_private_key("server_key.pem")
-        >>> certificate = load_certificate("server_cert.pem")
-        >>> data = b"Authenticated message"
-        >>> signature = sign_data(data, private_key)
-        >>> is_valid = verify_signature(data, signature, certificate)
-        >>> is_valid
-        True
+    Verify RSA-PSS signature using certificate's public key.
+    
+    Args: data, signature, certificate
+    Returns: True if valid, False otherwise
     """
     if not isinstance(data, bytes):
         raise TypeError(f"data must be bytes, got {type(data)}")

@@ -1,28 +1,12 @@
 #!/usr/bin/env python3
 """
-SecureChat PCAP Analysis Tool
+SecureChat PCAP analysis tool.
 
-Analyzes manually captured PCAPNG files to verify SecureChat protocol messages,
-encryption, signatures, and cryptographic operations.
+Analyzes captured PCAPNG files to verify protocol messages, encryption, and signatures.
+Does NOT capture packets - use tcpdump manually.
 
-This tool does NOT capture packets - use tcpdump manually:
-
-    # Terminal 1: Start server
-    python -m app.server.server
-
-    # Terminal 2: Start tcpdump capture
-    sudo tcpdump -i lo0 -w tests/evidence/secure_chat.pcapng port 9999
-
-    # Terminal 3: Run client and perform chat session
-
-    # Terminal 2: Stop tcpdump (Ctrl+C)
-
-    # Analyze the captured PCAP file
-    python tests/wireshark_capture.py analyze tests/evidence/secure_chat.pcapng
-
-Usage:
-    python tests/wireshark_capture.py analyze <pcap_file>
-    python tests/wireshark_capture.py list
+Capture with: sudo tcpdump -i lo0 -w capture.pcapng port 5000 or port 9999
+Analyze with: python scripts/wireshark_capture.py capture.pcapng
 """
 
 import sys
@@ -77,12 +61,8 @@ def check_tshark_available() -> bool:
         return False
 
 
-def extract_json_payload(hex_data: str) -> Optional[Dict[str, Any]]:
-    """
-    Extract JSON payload from hex data.
-    
-    Tries to locate and parse JSON object within hex data.
-    """
+def extract_json_payload(hex_data: str) -> Optional[Dict]:
+    """Extract JSON payload from hex data."""
     try:
         # Convert hex to ASCII, filtering for printable chars
         ascii_data = ""
@@ -108,7 +88,7 @@ def extract_json_payload(hex_data: str) -> Optional[Dict[str, Any]]:
 
 def analyze_pcap_file(pcap_path: Path) -> Dict[str, Any]:
     """
-    Analyze PCAP file using tshark to extract SecureChat protocol messages.
+    Analyze PCAP file using tshark.
     
     Returns structured analysis of all captured packets.
     """

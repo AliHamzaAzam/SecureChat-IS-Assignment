@@ -1,28 +1,12 @@
 #!/usr/bin/env python3
 """
-Replay Protection Test Suite for SecureChat
+Replay Protection Test Suite
 
-This test demonstrates that SecureChat's replay protection (via sequence numbers)
-properly rejects replayed messages. 
+Tests sequence number replay protection by capturing and replaying messages.
+Verifies messages with old sequence numbers are properly rejected.
 
-Test Scenario:
-1. Start a chat session
-2. Send messages 1, 2, 3
-3. Capture message 3
-4. Send messages 4, 5
-5. Replay captured message 3
-6. Expected: Message 3 is rejected (seqno 3 < last_received_seqno 5)
-
-Security Properties Tested:
-- Sequence number tracking prevents replay
-- Out-of-order message detection
-- Proper error handling for replay attempts
-
-Usage:
-    python tests/test_replay.py
-
-Output:
-    tests/replay_test.log - Detailed test execution log
+Usage: python tests/test_replay.py
+Output: tests/replay_test.log
 """
 
 import sys
@@ -123,19 +107,10 @@ class ChatSessionSimulator:
         return state
     
     def receive_message(self, msg_state: MessageState) -> Tuple[bool, str]:
-        """
-        Receive and validate a message using sequence number replay protection.
+        """Validate message using sequence number replay protection.
         
-        Replay Protection Logic:
-        1. Check if seqno > last_received_seqno
-        2. If seqno <= last_received_seqno: REPLAY ATTACK DETECTED
-        3. If seqno > last_received_seqno: Accept and update counter
-        
-        Args:
-            msg_state: Message to receive
-            
-        Returns:
-            (accepted: bool, reason: str)
+        Rejects if seqno <= last_received_seqno.
+        Returns: (accepted, reason)
         """
         seqno = msg_state.seqno
         
@@ -172,18 +147,9 @@ class ChatSessionSimulator:
 # ============================================================================
 
 def simulate_replay_attack() -> Dict:
-    """
-    Simulate a replay attack and verify detection.
+    """Simulate replay attack: send msgs 1-3, capture 3,  send 4-5, replay 3.
     
-    Scenario:
-    1. Send messages 1, 2, 3
-    2. Capture message 3
-    3. Send messages 4, 5
-    4. Replay message 3
-    5. Verify rejection
-    
-    Returns:
-        Test result dictionary
+    Returns: Test result dictionary
     """
     logger.info("=" * 70)
     logger.info("REPLAY ATTACK SIMULATION")
@@ -276,12 +242,8 @@ def simulate_replay_attack() -> Dict:
 
 
 def test_sequence_number_ordering() -> Dict:
-    """
-    Test that sequence numbers must be strictly increasing.
-    
-    Returns:
-        Test result dictionary
-    """
+    """Test that sequence numbers must be strictly increasing."""
+
     logger.info("=" * 70)
     logger.info("SEQUENCE NUMBER ORDERING TEST")
     logger.info("=" * 70)
@@ -350,12 +312,8 @@ def test_sequence_number_ordering() -> Dict:
 
 
 def test_duplicate_message() -> Dict:
-    """
-    Test that duplicate messages (exact same seqno) are rejected.
-    
-    Returns:
-        Test result dictionary
-    """
+    """Test that duplicate messages (same seqno) are rejected."""
+
     logger.info("=" * 70)
     logger.info("DUPLICATE MESSAGE TEST")
     logger.info("=" * 70)
@@ -416,12 +374,8 @@ def test_duplicate_message() -> Dict:
 
 
 def test_out_of_order_rejection() -> Dict:
-    """
-    Test that out-of-order messages (seqno 3 before seqno 2) are rejected.
+    """Test that out-of-order messages (seqno 3 before seqno 2) are rejected."""
     
-    Returns:
-        Test result dictionary
-    """
     logger.info("=" * 70)
     logger.info("OUT-OF-ORDER MESSAGE REJECTION TEST")
     logger.info("=" * 70)

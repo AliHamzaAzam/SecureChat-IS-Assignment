@@ -1,32 +1,12 @@
 #!/usr/bin/env python3
 """
-Offline session verification script for SecureChat non-repudiation validation.
+Offline verification of SecureChat session transcripts and receipts.
 
-This script provides tools for offline verification of chat session transcripts
-and receipts to ensure non-repudiation guarantees:
-
-1. Verify individual message signatures
-2. Verify transcript integrity (SHA-256 hash)
-3. Verify receipt signature using peer certificate
-4. Provide detailed audit report
+Verifies message signatures and session receipts for non-repudiation.
 
 Usage:
-    python scripts/verify_session.py \\
-        --transcript transcripts/alice_session_1762699111434.log \\
-        --receipt transcripts/alice_receipt_1762699111434.json \\
-        --cert certs/server_cert.pem
-
-The script performs:
-    - Parsing transcript entries (direction|seqno|ts|ct|sig|fp)
-    - Verifying message signatures using peer certificate
-    - Computing transcript hash (SHA-256 of concatenated entries)
-    - Verifying receipt signature against computed hash
-    - Reporting detailed results with error details
-
-Exit codes:
-    0 = All verifications passed
-    1 = Verification failures detected
-    2 = Invalid arguments or file not found
+    python scripts/verify_session.py transcripts/alice_session_XXX.log \\
+        transcripts/alice_receipt_XXX.json certs/server_cert.pem
 """
 
 import argparse
@@ -36,7 +16,7 @@ import sys
 import hashlib
 import base64
 from pathlib import Path
-from typing import Tuple, Dict, List, Optional
+from typing import Tuple, Dict, List, Optional, Any
 
 # Add parent directory to path for app module imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -50,32 +30,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def verify_message_signature(line: str, peer_cert_pem: str) -> Tuple[bool, str]:
+def verify_message_signature(line: str, peer_cert_pem: str) -> Tuple[bool, Optional[str]]:
     """
-    Verify a single transcript message signature.
+    Verify single transcript message signature.
     
-    Parses transcript line and verifies RSA-PSS signature:
-    Format: direction|seqno|ts|ct_b64|sig_b64|peer_fp
+    Parses line (direction|seqno|ts|ct_b64|sig_b64|peer_fp), reconstructs digest, verifies RSA-PSS.
     
-    Digest = SHA256(seqno_bytes(4) || ts_bytes(8) || ciphertext_bytes)
-    Note: The digest is computed over BINARY data, not strings
-    
-    Args:
-        line: Transcript entry line (without newline)
-        peer_cert_pem: PEM-encoded certificate for verification
-        
-    Returns:
-        (valid: bool, error: str)
-            - (True, "") if signature valid
-            - (False, error_msg) if invalid
-            
-    Example:
-        >>> line = "SENT|1|1762699117672|abc123==|def456==|a1b2c3d4..."
-        >>> valid, err = verify_message_signature(line, cert_pem)
-        >>> if valid:
-        ...     print("✓ Message signature valid")
-        ... else:
-        ...     print(f"✗ Signature invalid: {err}")
+    Returns: (is_valid, error_msg or None)
     """
     try:
         # Parse transcript line
@@ -137,45 +98,13 @@ def verify_message_signature(line: str, peer_cert_pem: str) -> Tuple[bool, str]:
 
 
 def verify_transcript_receipt(transcript_path: str, receipt_path: str, 
-                              peer_cert_pem: str) -> Tuple[bool, Dict]:
+                              peer_cert_pem: str) -> Dict[str, Any]:
     """
     Verify transcript integrity and receipt signature.
     
-    Steps:
-    1. Read all transcript lines
-    2. Compute SHA256(concatenated lines)
-    3. Verify receipt signature using certificate
-    4. Compare computed hash with receipt's transcript_sha256
+    Steps: Read transcript, compute SHA256, verify receipt signature.
     
-    Args:
-        transcript_path: Path to .log transcript file
-        receipt_path: Path to .json receipt file
-        peer_cert_pem: PEM-encoded certificate for verification
-        
-    Returns:
-        (valid: bool, details: dict)
-        
-        details contains:
-        {
-            "transcript_hash": str,           # Computed hash
-            "receipt_hash": str,              # Hash from receipt
-            "hash_match": bool,               # Hashes match
-            "receipt_sig_valid": bool,        # Signature valid
-            "first_seq": int,
-            "last_seq": int,
-            "error": str,                     # Error message if any
-        }
-        
-    Example:
-        >>> valid, details = verify_transcript_receipt(
-        ...     "transcripts/alice_session_*.log",
-        ...     "transcripts/alice_receipt_*.json",
-        ...     cert_pem
-        ... )
-        >>> if valid:
-        ...     print(f"✓ Transcript verified (hash: {details['transcript_hash'][:16]}...)")
-        ... else:
-        ...     print(f"✗ Error: {details['error']}")
+    Returns: Dict with 'valid', 'details', 'error'
     """
     details = {
         "transcript_hash": "",

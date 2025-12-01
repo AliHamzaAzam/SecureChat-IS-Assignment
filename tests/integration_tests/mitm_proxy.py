@@ -1,37 +1,18 @@
 #!/usr/bin/env python3
 """
-MITM (Man-in-the-Middle) Proxy for SecureChat Network Testing
+MITM (Man-in-the-Middle) Proxy for SecureChat testing.
 
-This module provides a transparent TCP proxy that intercepts SecureChat messages
-and allows modification/injection for security testing purposes.
+Transparent TCP proxy that intercepts and allows modification of SecureChat messages
+for security testing (tampering, replay attacks, protocol violations).
 
-Purpose: Verify that tampering, replay attacks, and protocol violations are
-detected and rejected by the actual server/client implementation.
-
-Architecture:
-  Client:5555 ---> Proxy:5001 ---> Server:9999
-  
-The proxy:
-  1. Accepts client connection on 5001
-  2. Connects to server on 999
-  3. Forwards all traffic bidirectionally
-  4. Allows intercepting and modifying specific messages
-  5. Can inject replayed messages or tampered data
-  6. Logs all activity for forensics
+Architecture: Client:5555 → Proxy:5001 → Server:9999
 
 Usage:
-  from tests.mitm_proxy import MITMProxy
-  
-  proxy = MITMProxy(listen_port=5001, target_host='127.0.0.1', target_port=9999)
-  proxy.start()
-  
-  # Modify behavior via callbacks
-  proxy.on_client_msg = lambda msg: tamper_ciphertext(msg)
-  
-  # Inject messages
-  proxy.inject_to_server(replayed_message)
-  
-  proxy.stop()
+    proxy = MITMProxy(listen_port=5001, target_port=9999)
+    proxy.on_client_msg = lambda msg: tamper_ciphertext(msg)
+    proxy.start()
+    proxy.inject_to_server(replayed_message)
+    proxy.stop()
 """
 
 import socket
@@ -67,11 +48,7 @@ class MITMProxy:
         """
         Initialize MITM proxy.
         
-        Args:
-            listen_port: Port to listen on for clients
-            target_host: Server host to forward to
-            target_port: Server port to forward to
-            buffer_size: TCP receive buffer size
+        Args: listen_port, target_host, target_port, buffer_size
         """
         self.listen_port = listen_port
         self.target_host = target_host
@@ -246,8 +223,7 @@ class MITMProxy:
         """
         Process message from client to server.
         
-        SecureChat protocol uses length-prefixed JSON:
-        [4 bytes: big-endian length] [JSON message]
+        Parses length-prefixed JSON: [4 bytes length][JSON message]
         """
         if len(data) < 4:
             return data
@@ -345,7 +321,7 @@ def tamper_ciphertext(msg: Dict[str, Any]) -> Dict[str, Any]:
     """
     Tamper with message ciphertext (flip one bit).
     
-    This should cause signature verification to fail.
+    Should cause signature verification to fail.
     """
     if 'ct' not in msg or msg['ct'] is None:
         return msg
@@ -377,7 +353,7 @@ def tamper_timestamp(msg: Dict[str, Any], delta_ms: int = 1000) -> Dict[str, Any
     """
     Tamper with message timestamp.
     
-    This should cause signature verification to fail.
+    Should cause signature verification to fail.
     """
     if 'ts' not in msg:
         return msg
@@ -393,7 +369,7 @@ def tamper_seqno(msg: Dict[str, Any], delta: int = 1) -> Dict[str, Any]:
     """
     Tamper with message sequence number.
     
-    This should cause signature verification to fail or replay detection.
+    Should cause signature verification to fail or replay detection.
     """
     if 'seqno' not in msg:
         return msg
@@ -409,7 +385,7 @@ def tamper_signature(msg: Dict[str, Any]) -> Dict[str, Any]:
     """
     Tamper with message signature (flip one bit).
     
-    This should cause signature verification to fail.
+    Should cause signature verification to fail.
     """
     if 'sig' not in msg or msg['sig'] is None:
         return msg

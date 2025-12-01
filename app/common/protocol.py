@@ -1,24 +1,8 @@
 """
 Protocol message definitions for SecureChat.
 
-This module defines the message formats exchanged between client and server using
-dataclasses. All messages are serialized to JSON for transmission over the network.
-
-Message Flow:
-    1. HELLO: Client initiates with certificate and nonce
-    2. SERVER_HELLO: Server responds with certificate and nonce
-    3. REGISTER: Client sends registration request (optional)
-    4. LOGIN: Client sends login credentials
-    5. DH_CLIENT: Client initiates DH key exchange
-    6. DH_SERVER: Server responds with DH public key
-    7. MSG: Chat message (encrypted and signed)
-    8. RECEIPT: Session receipt for non-repudiation
-
-Security:
-    - All control plane messages include nonce to prevent replay attacks
-    - Chat messages include sequence number and timestamp
-    - Messages are signed using RSA signatures
-    - Ciphertexts and signatures are base64-encoded for JSON compatibility
+Defines dataclasses for all message types (HELLO, DH, MSG, RECEIPT) serialized
+to/from JSON. All messages use length-prefixed framing over TCP.
 """
 
 from dataclasses import dataclass, asdict, field
@@ -175,26 +159,12 @@ class SessionReceipt:
 
 def serialize_message(msg_obj) -> str:
     """
-    Serialize a message dataclass to JSON string.
-
-    Handles custom serialization for dataclass instances by calling their
-    to_dict() method, or using asdict() if not available.
-
-    Args:
-        msg_obj: Message dataclass instance (ControlPlaneMsg, DHClientMsg, etc.)
-
-    Returns:
-        str: JSON-formatted message string
-
-    Raises:
-        TypeError: If message object is not a valid dataclass
-        ValueError: If JSON serialization fails
-
-    Example:
-        >>> msg = ControlPlaneMsg(type="HELLO", nonce="abc123")
-        >>> json_str = serialize_message(msg)
-        >>> '{"type": "HELLO", "nonce": "abc123"}' in json_str
-        True
+    Serialize message dataclass to JSON string.
+    
+    Calls to_dict() method or uses asdict() if unavailable.
+    
+    Returns: Compact JSON string
+    Raises: TypeError, ValueError
     """
     try:
         if hasattr(msg_obj, "to_dict"):
@@ -216,26 +186,10 @@ def serialize_message(msg_obj) -> str:
 
 def deserialize_message(json_str: str) -> dict:
     """
-    Deserialize a JSON string to a dictionary.
-
-    Parses JSON string and returns the dictionary representation.
-    The caller is responsible for constructing the appropriate dataclass.
-
-    Args:
-        json_str: JSON-formatted message string
-
-    Returns:
-        dict: Parsed message dictionary with keys matching dataclass fields
-
-    Raises:
-        ValueError: If JSON is malformed
-        TypeError: If json_str is not a string
-
-    Example:
-        >>> json_str = '{"type": "HELLO", "nonce": "abc123"}'
-        >>> msg_dict = deserialize_message(json_str)
-        >>> msg_dict["type"]
-        'HELLO'
+    Deserialize JSON string to dictionary.
+    
+    Returns: Message dictionary
+    Raises: json.JSONDecodeError, ValueError
     """
     if not isinstance(json_str, str):
         raise TypeError(f"json_str must be string, got {type(json_str)}")
@@ -251,25 +205,11 @@ def deserialize_message(json_str: str) -> dict:
 
 def message_dict_to_obj(msg_dict: dict):
     """
-    Convert a message dictionary to the appropriate dataclass instance.
-
-    Uses the 'type' field to determine which dataclass to instantiate.
-
-    Args:
-        msg_dict: Message dictionary with 'type' field
-
-    Returns:
-        Message dataclass instance (ControlPlaneMsg, DHClientMsg, etc.)
-
-    Raises:
-        ValueError: If message type is unknown or required fields missing
-        TypeError: If msg_dict is not a dictionary
-
-    Example:
-        >>> msg_dict = {"type": "DH_CLIENT", "g": 2, "p": "0xffff", "A": "0x1234"}
-        >>> msg_obj = message_dict_to_obj(msg_dict)
-        >>> isinstance(msg_obj, DHClientMsg)
-        True
+    Convert message dictionary to appropriate dataclass instance.
+    
+    Uses 'type' field to determine which dataclass to instantiate.
+    
+    Returns: Dataclass instance or None if unknown type
     """
     if not isinstance(msg_dict, dict):
         raise TypeError(f"msg_dict must be dict, got {type(msg_dict)}")

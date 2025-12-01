@@ -1,29 +1,11 @@
 #!/usr/bin/env python3
 """
-Message Tampering & Integrity Verification Test Suite for SecureChat
+Message Tampering & Integrity Verification Test Suite
 
-This test demonstrates that SecureChat's message signature verification
-correctly detects tampering and rejects modified messages.
+Tests signature verification properly detects tampering in ciphertext, timestamp, and seqno fields.
 
-Test Scenario:
-1. Intercept a ChatMsg during transmission
-2. Modify different fields (ciphertext, timestamp, sequence number)
-3. Send tampered message to receiver
-4. Verify: Signature verification fails
-5. Verify: Message rejected with "SIG_FAIL" error
-
-Security Properties Tested:
-- Integrity: Modified messages are detected
-- Authenticity: Signatures prevent tampering
-- Message structure protection: All fields are signed
-
-Usage:
-    python tests/test_tampering.py
-
-Output:
-    tests/tampering_test.log - Detailed execution log
-    tests/tampering_test_results.json - Structured results
-    tests/evidence/ - Screenshots and error logs
+Usage: python tests/test_tampering.py
+Output: tests/tampering_test.log, tests/evidence/
 """
 
 import sys
@@ -99,18 +81,7 @@ class CryptoSimulator:
     
     @staticmethod
     def compute_message_digest(msg: ChatMsg) -> MessageDigest:
-        """
-        Compute the digest of a message (what gets signed).
-        
-        According to SecureChat protocol:
-        digest = seqno_bytes(4) || ts_bytes(8) || ciphertext_bytes
-        
-        Args:
-            msg: ChatMsg to digest
-            
-        Returns:
-            MessageDigest with all components
-        """
+        """Compute message digest: seqno(4) || ts(8) || ciphertext."""
         # Convert seqno to 4 bytes (big-endian)
         seqno_bytes = msg.seqno.to_bytes(4, byteorder='big')
         
@@ -134,21 +105,7 @@ class CryptoSimulator:
             full_digest=full_digest
         )
     
-    @staticmethod
-    def verify_signature(msg: ChatMsg, expected_digest: MessageDigest) -> Tuple[bool, str]:
-        """
-        Simulate signature verification.
-        
-        In real SecureChat, this would use RSA-PSS verification with public key.
-        Here we simulate by checking if the signature was derived from the message digest.
-        
-        Args:
-            msg: ChatMsg with signature
-            expected_digest: The digest that should have been signed
-            
-        Returns:
-            (is_valid: bool, reason: str)
-        """
+
         try:
             # Decode signature from base64
             sig_bytes = base64.b64decode(msg.sig)
@@ -171,16 +128,7 @@ class TamperingSimulator:
     
     @staticmethod
     def flip_bit_in_base64(value: str, bit_position: Optional[int] = None) -> str:
-        """
-        Flip one bit in a base64-encoded value.
-        
-        Args:
-            value: Base64-encoded string
-            bit_position: Which bit to flip (0-based). If None, pick first non-padding bit.
-            
-        Returns:
-            Modified base64 string with one bit flipped
-        """
+        """Flip one bit in base64-encoded value."""
         if not value or len(value) < 2:
             return value
         
@@ -211,16 +159,7 @@ class TamperingSimulator:
     
     @staticmethod
     def inject_tampered_message(original_msg: ChatMsg, field_to_modify: str) -> Tuple[ChatMsg, str]:
-        """
-        Inject a tampered version of a message.
-        
-        Args:
-            original_msg: Original ChatMsg
-            field_to_modify: Which field to modify ('ciphertext', 'timestamp', 'seqno')
-            
-        Returns:
-            (tampered_msg: ChatMsg, description: str)
-        """
+        """Create tampered version by modifying specified field."""
         import copy
         tampered = copy.deepcopy(original_msg)
         description = ""
@@ -257,16 +196,7 @@ class IntegrityVerifier:
     
     @staticmethod
     def verify_message_integrity(msg: ChatMsg, original_digest: Optional[MessageDigest] = None) -> Tuple[bool, str]:
-        """
-        Verify message integrity by checking signature.
-        
-        Args:
-            msg: ChatMsg to verify
-            original_digest: Original digest (if available)
-            
-        Returns:
-            (is_valid: bool, reason: str)
-        """
+        """Verify message integrity via signature check."""
         # Compute digest of current message
         current_digest = CryptoSimulator.compute_message_digest(msg)
         
@@ -281,18 +211,7 @@ class IntegrityVerifier:
 # ============================================================================
 
 def test_ciphertext_tampering() -> Dict:
-    """
-    Test that ciphertext tampering is detected.
-    
-    Scenario:
-    1. Create a valid message with signature
-    2. Flip a bit in the ciphertext
-    3. Verify signature fails
-    4. Verify message is rejected
-    
-    Returns:
-        Test result dictionary
-    """
+    """Test ciphertext tampering is detected via signature verification."""
     logger.info("=" * 70)
     logger.info("TEST 1: CIPHERTEXT TAMPERING DETECTION")
     logger.info("=" * 70)
@@ -382,18 +301,7 @@ def test_ciphertext_tampering() -> Dict:
 
 
 def test_timestamp_tampering() -> Dict:
-    """
-    Test that timestamp tampering is detected.
-    
-    Scenario:
-    1. Create a valid message
-    2. Modify timestamp (add 1 second)
-    3. Verify signature fails
-    4. Verify message is rejected
-    
-    Returns:
-        Test result dictionary
-    """
+    """Test timestamp tampering is detected via signature verification."""
     logger.info("=" * 70)
     logger.info("TEST 2: TIMESTAMP TAMPERING DETECTION")
     logger.info("=" * 70)
@@ -482,18 +390,7 @@ def test_timestamp_tampering() -> Dict:
 
 
 def test_seqno_tampering() -> Dict:
-    """
-    Test that sequence number tampering is detected.
-    
-    Scenario:
-    1. Create a valid message
-    2. Modify sequence number (increment by 1)
-    3. Verify signature fails
-    4. Verify message is rejected
-    
-    Returns:
-        Test result dictionary
-    """
+    """Test sequence number tampering is detected via signature verification."""
     logger.info("=" * 70)
     logger.info("TEST 3: SEQUENCE NUMBER TAMPERING DETECTION")
     logger.info("=" * 70)
@@ -582,18 +479,7 @@ def test_seqno_tampering() -> Dict:
 
 
 def test_multiple_bit_flips() -> Dict:
-    """
-    Test that multiple bit flips in ciphertext are detected.
-    
-    Scenario:
-    1. Create a valid message
-    2. Flip multiple bits in ciphertext
-    3. Verify signature still fails
-    4. Demonstrate that even small tampering is caught
-    
-    Returns:
-        Test result dictionary
-    """
+    """Test multiple bit flips in ciphertext are detected."""
     logger.info("=" * 70)
     logger.info("TEST 4: MULTIPLE BIT FLIPS DETECTION")
     logger.info("=" * 70)
